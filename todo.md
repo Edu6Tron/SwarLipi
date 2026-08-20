@@ -12,4 +12,7 @@
 - [x] Validate the TypeScript build and verify the principal app flows
 - [x] Prepare Android release metadata and device-specific installation guidance for a Realme Narzo 70 Turbo
 - [x] Add a professional repository README, licensing information, and GitHub-ready project hygiene files
-- [ ] Validate the Android-ready source project and publish it to the selected GitHub repository
+- [x] Validate the Android-ready source project and publish it to the selected GitHub repository
+- [x] Define secure Android signing, versioning, and release-note conventions for automatic GitHub releases
+- [x] Add a GitHub Actions pipeline that builds an APK, creates a versioned release, and attaches release artifacts on each approved run
+- [ ] Validate and publish the automated Android release workflow

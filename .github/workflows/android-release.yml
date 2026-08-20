@@ -1,0 +1,110 @@
+name: Android APK Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-android:
+    name: Build and release signed APK
+    runs-on: ubuntu-latest
+    env:
+      APP_VERSION: 1.0.${{ github.run_number }}
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
+      ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android/release-keystore.jks
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.SWARLIPI_ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.SWARLIPI_ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.SWARLIPI_ANDROID_KEY_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Validate source
+        run: |
+          pnpm check
+          pnpm test
+      - name: Generate Android native project
+        run: npx expo prebuild --platform android --clean --non-interactive --no-install
+      - name: Restore Android signing key
+        run: |
+          echo "${{ secrets.SWARLIPI_ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          test -s "$ANDROID_KEYSTORE_PATH"
+      - name: Configure Gradle release signing
+        run: |
+          cat >> android/app/build.gradle <<'EOF'
+
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv("ANDROID_KEYSTORE_PATH"))
+                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          EOF
+      - name: Build signed release APK
+        working-directory: android
+        run: ./gradlew --no-daemon --max-workers=2 :app:assembleRelease
+      - name: Prepare release artifacts and notes
+        run: |
+          mkdir -p release-artifacts
+          APK_SOURCE="android/app/build/outputs/apk/release/app-release.apk"
+          APK_NAME="SwarLipi-${APP_VERSION}-release.apk"
+          cp "$APK_SOURCE" "release-artifacts/$APK_NAME"
+          sha256sum "release-artifacts/$APK_NAME" > "release-artifacts/$APK_NAME.sha256"
+          cat > release-artifacts/RELEASE_NOTES.md <<EOF
+          ## SwarLipi ${APP_VERSION}
+
+          This Android APK was built and released automatically by GitHub Actions.
+
+          | Build detail | Value |
+          | --- | --- |
+          | Version name | \\`${APP_VERSION}\\` |
+          | Version code | \\`${ANDROID_VERSION_CODE}\\` |
+          | Source commit | \\`${GITHUB_SHA}\\` |
+          | Workflow run | [#${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) |
+
+          SwarLipi remains offline-first: saved texts, annotations, and reader preferences are stored locally. Test the APK on a real Android device before relying on backup restoration.
+          EOF
+      - name: Create GitHub release
+        run: |
+          gh release create "v${APP_VERSION}" \
+            release-artifacts/*.apk \
+            release-artifacts/*.sha256 \
+            --title "SwarLipi ${APP_VERSION}" \
+            --notes-file release-artifacts/RELEASE_NOTES.md \
+            --target "$GITHUB_SHA"
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Swarlipi-${{ env.APP_VERSION }}-android-release
+          path: release-artifacts/
+          if-no-files-found: error
+          retention-days: 30

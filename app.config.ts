@@ -25,6 +25,9 @@ const bundleId =
 // e.g., "space.manus.my.app.t20240115103045" -> "manus20240115103045"
 const timestamp = bundleId.split(".").pop()?.replace(/^t/, "") ?? "";
 const schemeFromBundleId = `manus${timestamp}`;
+const releaseVersion = process.env.APP_VERSION ?? "1.0.0";
+const requestedVersionCode = Number(process.env.ANDROID_VERSION_CODE ?? "1");
+const androidVersionCode = Number.isInteger(requestedVersionCode) && requestedVersionCode > 0 ? requestedVersionCode : 1;
 
 const env = {
   // App branding - update these values directly (do not use env vars)
@@ -41,7 +44,7 @@ const env = {
 const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
-  version: "1.0.0",
+  version: releaseVersion,
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme: env.scheme,
@@ -56,7 +59,7 @@ const config: ExpoConfig = {
   },
   android: {
     allowBackup: true,
-    versionCode: 1,
+    versionCode: androidVersionCode,
     adaptiveIcon: {
       backgroundColor: "#E6F4FE",
       foregroundImage: "./assets/images/android-icon-foreground.png",

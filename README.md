@@ -43,6 +43,10 @@ The app is designed for current Android phones, including the Realme Narzo 70 Tu
 
 The repository includes a GitHub Actions workflow that runs TypeScript validation and the deterministic test suite for every push and pull request. Before publishing a mobile build, test the primary reading and restore paths on an actual Android device.
 
+## Automatic Android releases
+
+Every push to `main` triggers the Android release workflow after source validation. The workflow derives a unique semantic version from the GitHub Actions run number, builds a signed release APK, produces a SHA-256 checksum, and creates a GitHub Release containing a concise build description and both artifacts. The release signing material remains in GitHub Actions secrets and is never committed to the repository. See [`docs/android-release-pipeline.md`](docs/android-release-pipeline.md) for the release convention and device-installation notes.
+
 ## Privacy and backup note
 
 SwarLipi has no account, cloud sync, or network-required reading flow. Its text library lives in the app’s local storage. Android automatic backup may include eligible app data when the device and user backup configuration permit it; see Android’s official Auto Backup guidance for the operating-system rules.[1]
