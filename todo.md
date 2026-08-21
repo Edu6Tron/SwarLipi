@@ -22,4 +22,7 @@
 - [x] Validate the crash fix and ordering flow in a signed Android release
 - [x] Diagnose the Android drag-state freeze in the text arrangement screen
 - [x] Replace unreliable gesture drag-and-drop with stable one-step ordering controls that persist locally
-- [ ] Validate the corrected ordering flow and publish a signed Android APK update
+- [x] Validate the corrected ordering flow and publish a signed Android APK update
+- [x] Reassess and fix the repeated Android crash when opening any text for the first time
+- [x] Replace the fullscreen reader's native Modal launch with a stable in-app overlay path
+- [ ] Validate the reader launch redesign in a signed Android APK and retest it on the Realme device

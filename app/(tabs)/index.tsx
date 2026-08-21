@@ -1,7 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
-import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
@@ -29,7 +28,6 @@ const { height: WINDOW_HEIGHT } = Dimensions.get("window");
 const ALL_FILTER = "All";
 const SPEED_MIN = 10;
 const SPEED_MAX = 72;
-const READER_KEEP_AWAKE_TAG = "swarlipi-reader";
 
 function formatPreview(body: string) {
   return body.replace(/\s+/g, " ").trim();
@@ -443,32 +441,12 @@ interface ReaderOverlayProps {
   onClose: (progress: number) => void;
 }
 
-function useReaderKeepAwake() {
-  useEffect(() => {
-    if (Platform.OS === "web") return;
-    let disposed = false;
-
-    void activateKeepAwakeAsync(READER_KEEP_AWAKE_TAG)
-      .then(() => {
-        if (disposed) void deactivateKeepAwake(READER_KEEP_AWAKE_TAG).catch(() => undefined);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      disposed = true;
-      void deactivateKeepAwake(READER_KEEP_AWAKE_TAG).catch(() => undefined);
-    };
-  }, []);
-}
-
 function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
-  useReaderKeepAwake();
   const { annotations, addAnnotation, preferences, setPreferences } = useSwarLipi();
   const scrollRef = useRef<ScrollView>(null);
   const mountedRef = useRef(true);
   const offsetRef = useRef(0);
   const progressRef = useRef(text.lastReadOffset);
-  const initialOffsetApplied = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(text.lastReadOffset);
   const [scrollRate, setScrollRate] = useState(preferences.scrollRate);
@@ -487,19 +465,6 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
       mountedRef.current = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (initialOffsetApplied.current || maxOffset <= 0) return;
-    const startingOffset = getReaderOffset(text.lastReadOffset, maxOffset);
-    offsetRef.current = startingOffset;
-    progressRef.current = getReaderProgress(startingOffset, maxOffset);
-    initialOffsetApplied.current = true;
-    const frame = requestAnimationFrame(() => {
-      if (!mountedRef.current) return;
-      scrollRef.current?.scrollTo({ y: startingOffset, animated: false });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [maxOffset, text.lastReadOffset]);
 
   useEffect(() => {
     if (!playing || maxOffset <= 0) return;
@@ -572,7 +537,6 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
 
   return (
     <View style={styles.readerRoot}>
-      <StatusBar style="light" />
       <LinearGradient colors={["#4B0714", "#861A28", "#301019", "#101014"]} locations={[0, 0.45, 0.78, 1]} style={StyleSheet.absoluteFill} />
       <View style={styles.readerGlowOne} />
       <View style={styles.readerGlowTwo} />
@@ -618,7 +582,7 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
           if (mountedRef.current) setProgress(nextProgress);
         }}
       >
-        <Animated.View entering={FadeIn.duration(400)} style={styles.readerTextBlock}>
+        <View style={styles.readerTextBlock}>
           <View style={styles.readerLanguageTag}><Text style={styles.readerLanguageTagText}>{text.language}</Text></View>
           <Text style={[styles.readerBody, { fontSize: readerSize, lineHeight: readerLineHeight }]}>{text.body}</Text>
           <View style={styles.readerEndMark}>
@@ -627,7 +591,7 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
             <View style={styles.readerEndLine} />
           </View>
           <Text style={styles.readerEndText}>Saved in SwarLipi</Text>
-        </Animated.View>
+        </View>
       </ScrollView>
 
       <View style={styles.readerControls}>
@@ -815,7 +779,7 @@ function LibraryScreen() {
       <ManageSheet text={managedText} onDismiss={() => setManagedText(null)} onEdit={openManagedEdit} />
       <SettingsSheet visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} />
       <ArrangeSheet visible={arrangeOpen} texts={texts} onDismiss={() => setArrangeOpen(false)} onSave={reorderTexts} />
-      {activeText ? <Modal visible animationType="fade" hardwareAccelerated statusBarTranslucent onRequestClose={() => closeReader(activeText.lastReadOffset)}><ReaderOverlay text={activeText} onClose={closeReader} /></Modal> : null}
+      {activeText ? <ReaderOverlay text={activeText} onClose={closeReader} /> : null}
     </ScreenContainer>
   );
 }
@@ -928,7 +892,7 @@ const styles = StyleSheet.create({
   backupText: { color: "#C1B0B4", fontSize: 12, lineHeight: 17, marginTop: 4 },
   doneSettingsButton: { height: 49, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#FFC071", marginTop: 20 },
   doneSettingsText: { color: "#291319", fontSize: 15, fontWeight: "800" },
-  readerRoot: { flex: 1, backgroundColor: "#1A0C13", overflow: "hidden" },
+  readerRoot: { ...StyleSheet.absoluteFillObject, zIndex: 50, backgroundColor: "#1A0C13", overflow: "hidden" },
   readerGlowOne: { position: "absolute", width: 330, height: 330, borderRadius: 165, backgroundColor: "rgba(229,79,87,0.18)", top: 125, right: -205 },
   readerGlowTwo: { position: "absolute", width: 240, height: 240, borderRadius: 120, backgroundColor: "rgba(250,168,80,0.12)", bottom: 105, left: -150 },
   readerHeader: { paddingTop: Platform.OS === "android" ? 30 : 15, paddingHorizontal: 20, paddingBottom: 14, flexDirection: "row", alignItems: "center", backgroundColor: "rgba(26,8,14,0.42)" },
