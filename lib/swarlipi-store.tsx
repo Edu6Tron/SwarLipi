@@ -10,6 +10,7 @@ import {
   encodeLibrary,
   LibraryState,
   ReaderPreferences,
+  reorderSavedTexts,
   SavedText,
   STORAGE_KEY,
   TextLanguage,
@@ -25,6 +26,7 @@ interface SwarLipiContextValue extends LibraryState {
   hydrated: boolean;
   createText: (input: CreateTextInput) => void;
   updateText: (id: string, changes: Partial<Pick<SavedText, "title" | "language" | "body" | "lastReadOffset">>) => void;
+  reorderTexts: (orderedIds: string[]) => void;
   deleteText: (id: string) => void;
   addAnnotation: (textId: string, body: string, anchorOffset: number) => void;
   setPreferences: (changes: Partial<ReaderPreferences>) => void;
@@ -95,6 +97,13 @@ export function SwarLipiProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
+  const reorderTexts = useCallback(
+    (orderedIds: string[]) => {
+      commit((current) => ({ ...current, texts: reorderSavedTexts(current.texts, orderedIds) }));
+    },
+    [commit],
+  );
+
   const deleteText = useCallback(
     (id: string) => {
       commit((current) => ({
@@ -128,8 +137,8 @@ export function SwarLipiProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<SwarLipiContextValue>(
-    () => ({ ...library, hydrated, createText, updateText, deleteText, addAnnotation, setPreferences }),
-    [library, hydrated, createText, updateText, deleteText, addAnnotation, setPreferences],
+    () => ({ ...library, hydrated, createText, updateText, reorderTexts, deleteText, addAnnotation, setPreferences }),
+    [library, hydrated, createText, updateText, reorderTexts, deleteText, addAnnotation, setPreferences],
   );
 
   return <SwarLipiContext.Provider value={value}>{children}</SwarLipiContext.Provider>;

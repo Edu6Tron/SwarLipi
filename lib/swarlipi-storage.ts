@@ -132,6 +132,19 @@ export function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), maximum);
 }
 
+export function reorderSavedTexts(texts: SavedText[], orderedIds: string[]): SavedText[] {
+  const textById = new Map(texts.map((text) => [text.id, text]));
+  const seen = new Set<string>();
+  const ordered = orderedIds.flatMap((id) => {
+    const text = textById.get(id);
+    if (!text || seen.has(id)) return [];
+    seen.add(id);
+    return [text];
+  });
+
+  return [...ordered, ...texts.filter((text) => !seen.has(text.id))];
+}
+
 export function createId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }

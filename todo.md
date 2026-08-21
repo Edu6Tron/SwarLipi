@@ -15,4 +15,8 @@
 - [x] Validate the Android-ready source project and publish it to the selected GitHub repository
 - [x] Define secure Android signing, versioning, and release-note conventions for automatic GitHub releases
 - [x] Add a GitHub Actions pipeline that builds an APK, creates a versioned release, and attaches release artifacts on each approved run
-- [ ] Validate and publish the automated Android release workflow
+- [x] Validate and publish the automated Android release workflow
+- [x] Diagnose and fix the intermittent Android crash when opening a saved text in the reader
+- [x] Add persistent manual ordering for saved texts with a YouTube-style drag handle and arrangement mode
+- [x] Add deterministic tests for reader lifecycle safety and local text reordering
+- [ ] Validate the crash fix and ordering flow in a signed Android release

@@ -1,8 +1,9 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
-import { useKeepAwake } from "expo-keep-awake";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import DraggableFlatList from "react-native-draggable-flatlist";
 import {
   Dimensions,
   FlatList,
@@ -21,6 +22,7 @@ import Animated, { FadeIn, FadeInDown, FadeOut, SlideInDown, SlideOutDown } from
 
 import { ScreenContainer } from "@/components/screen-container";
 import { feedback } from "@/lib/haptics";
+import { getReaderMaxOffset, getReaderOffset, getReaderProgress } from "@/lib/reader-safety";
 import { useSwarLipi } from "@/lib/swarlipi-store";
 import { Annotation, clamp, LANGUAGE_OPTIONS, SavedText, TextLanguage } from "@/lib/swarlipi-storage";
 
@@ -28,6 +30,7 @@ const { height: WINDOW_HEIGHT } = Dimensions.get("window");
 const ALL_FILTER = "All";
 const SPEED_MIN = 10;
 const SPEED_MAX = 72;
+const READER_KEEP_AWAKE_TAG = "swarlipi-reader";
 
 function formatPreview(body: string) {
   return body.replace(/\s+/g, " ").trim();
@@ -297,6 +300,83 @@ function ManageSheet({ text, onDismiss, onEdit }: ManageSheetProps) {
   );
 }
 
+interface ArrangeSheetProps {
+  visible: boolean;
+  texts: SavedText[];
+  onDismiss: () => void;
+  onSave: (orderedIds: string[]) => void;
+}
+
+function ArrangeSheet({ visible, texts, onDismiss, onSave }: ArrangeSheetProps) {
+  const [draftTexts, setDraftTexts] = useState(texts);
+
+  useEffect(() => {
+    if (visible) setDraftTexts(texts);
+  }, [texts, visible]);
+
+  function saveArrangement() {
+    onSave(draftTexts.map((text) => text.id));
+    feedback.confirm();
+    onDismiss();
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onDismiss}>
+      <StatusBar style="light" />
+      <View style={styles.arrangeRoot}>
+        <View style={styles.arrangeHeader}>
+          <Pressable onPress={onDismiss} hitSlop={12} style={({ pressed }) => [styles.roundIcon, pressed && styles.iconPressed]}>
+            <MaterialIcons name="close" size={22} color="#FFF8F2" />
+          </Pressable>
+          <View style={styles.arrangeHeaderCopy}>
+            <Text style={styles.composerEyebrow}>YOUR LIBRARY, YOUR ORDER</Text>
+            <Text style={styles.arrangeTitle}>Arrange texts</Text>
+          </View>
+          <Pressable onPress={saveArrangement} style={({ pressed }) => [styles.saveButton, pressed && styles.saveButtonPressed]}>
+            <Text style={styles.saveButtonText}>Done</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.arrangeCaption}>Hold the handle and drag a text into the place that feels right. Your order remains on this device.</Text>
+        <DraggableFlatList
+          data={draftTexts}
+          keyExtractor={(item) => item.id}
+          onDragEnd={({ data }) => setDraftTexts(data)}
+          activationDistance={6}
+          contentContainerStyle={styles.arrangeList}
+          renderItem={({ item, drag, isActive, getIndex }) => {
+            const accent = documentAccent(item.language);
+            const index = getIndex() ?? 0;
+            return (
+              <View style={[styles.arrangeCard, isActive && styles.arrangeCardActive]}>
+                <Text style={styles.arrangePosition}>{index + 1}</Text>
+                <LinearGradient colors={accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.arrangeAccent}>
+                  <Text style={styles.arrangeInitial}>{item.title.trim().slice(0, 1) || "•"}</Text>
+                </LinearGradient>
+                <View style={styles.arrangeCardCopy}>
+                  <Text numberOfLines={1} style={styles.arrangeCardTitle}>{item.title}</Text>
+                  <Text numberOfLines={1} style={styles.arrangeCardMeta}>{item.language} · {formatPreview(item.body)}</Text>
+                </View>
+                <Pressable
+                  accessibilityRole="adjustable"
+                  accessibilityLabel={`Drag ${item.title} to rearrange`}
+                  delayLongPress={90}
+                  onLongPress={() => {
+                    feedback.select();
+                    drag();
+                  }}
+                  style={({ pressed }) => [styles.dragHandle, (pressed || isActive) && styles.iconPressed]}
+                >
+                  <MaterialIcons name="drag-handle" size={28} color="#EAD7D0" />
+                </Pressable>
+              </View>
+            );
+          }}
+        />
+      </View>
+    </Modal>
+  );
+}
+
 interface SettingsSheetProps {
   visible: boolean;
   onDismiss: () => void;
@@ -347,10 +427,29 @@ interface ReaderOverlayProps {
   onClose: (progress: number) => void;
 }
 
+function useReaderKeepAwake() {
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    let disposed = false;
+
+    void activateKeepAwakeAsync(READER_KEEP_AWAKE_TAG)
+      .then(() => {
+        if (disposed) void deactivateKeepAwake(READER_KEEP_AWAKE_TAG).catch(() => undefined);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      disposed = true;
+      void deactivateKeepAwake(READER_KEEP_AWAKE_TAG).catch(() => undefined);
+    };
+  }, []);
+}
+
 function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
-  useKeepAwake("swarlipi-reader");
+  useReaderKeepAwake();
   const { annotations, addAnnotation, preferences, setPreferences } = useSwarLipi();
   const scrollRef = useRef<ScrollView>(null);
+  const mountedRef = useRef(true);
   const offsetRef = useRef(0);
   const progressRef = useRef(text.lastReadOffset);
   const initialOffsetApplied = useRef(false);
@@ -363,16 +462,27 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
   const [notesOpen, setNotesOpen] = useState(false);
   const [newNote, setNewNote] = useState("");
   const readerNotes = useMemo(() => annotations.filter((annotation) => annotation.textId === text.id), [annotations, text.id]);
-  const maxOffset = Math.max(metrics.content - metrics.viewport, 0);
+  const maxOffset = getReaderMaxOffset(metrics.content, metrics.viewport);
   const accent = documentAccent(text.language);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (initialOffsetApplied.current || maxOffset <= 0) return;
-    const startingOffset = clamp(text.lastReadOffset, 0, 1) * maxOffset;
+    const startingOffset = getReaderOffset(text.lastReadOffset, maxOffset);
     offsetRef.current = startingOffset;
-    progressRef.current = text.lastReadOffset;
-    scrollRef.current?.scrollTo({ y: startingOffset, animated: false });
+    progressRef.current = getReaderProgress(startingOffset, maxOffset);
     initialOffsetApplied.current = true;
+    const frame = requestAnimationFrame(() => {
+      if (!mountedRef.current) return;
+      scrollRef.current?.scrollTo({ y: startingOffset, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
   }, [maxOffset, text.lastReadOffset]);
 
   useEffect(() => {
@@ -382,16 +492,16 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
     let active = true;
 
     const tick = (time: number) => {
-      if (!active) return;
+      if (!active || !mountedRef.current) return;
       if (!previous) previous = time;
       const delta = Math.min(40, time - previous);
       previous = time;
       const next = Math.min(maxOffset, offsetRef.current + (scrollRate * delta) / 1000);
       offsetRef.current = next;
-      const nextProgress = maxOffset === 0 ? 0 : next / maxOffset;
+      const nextProgress = getReaderProgress(next, maxOffset);
       progressRef.current = nextProgress;
-      setProgress(nextProgress);
-      scrollRef.current?.scrollTo({ y: next, animated: false });
+      if (mountedRef.current) setProgress(nextProgress);
+      if (mountedRef.current) scrollRef.current?.scrollTo({ y: next, animated: false });
 
       if (next >= maxOffset - 0.5) {
         setPlaying(false);
@@ -408,8 +518,8 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
   }, [maxOffset, playing, scrollRate]);
 
   const seek = useCallback((nextProgress: number) => {
-    const safeProgress = clamp(nextProgress, 0, 1);
-    const nextOffset = safeProgress * maxOffset;
+    const nextOffset = getReaderOffset(nextProgress, maxOffset);
+    const safeProgress = getReaderProgress(nextOffset, maxOffset);
     offsetRef.current = nextOffset;
     progressRef.current = safeProgress;
     setProgress(safeProgress);
@@ -477,15 +587,19 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
         contentContainerStyle={styles.readerScrollContent}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
-        onLayout={(event) => setMetrics((current) => ({ ...current, viewport: event.nativeEvent.layout.height }))}
-        onContentSizeChange={(_, height) => setMetrics((current) => ({ ...current, content: height }))}
+        onLayout={(event) => {
+          if (mountedRef.current) setMetrics((current) => ({ ...current, viewport: event.nativeEvent.layout.height }));
+        }}
+        onContentSizeChange={(_, height) => {
+          if (mountedRef.current) setMetrics((current) => ({ ...current, content: height }));
+        }}
         onScroll={(event) => {
           if (playing) return;
           const nextOffset = event.nativeEvent.contentOffset.y;
           offsetRef.current = nextOffset;
-          const nextProgress = maxOffset > 0 ? clamp(nextOffset / maxOffset, 0, 1) : 0;
+          const nextProgress = getReaderProgress(nextOffset, maxOffset);
           progressRef.current = nextProgress;
-          setProgress(nextProgress);
+          if (mountedRef.current) setProgress(nextProgress);
         }}
       >
         <Animated.View entering={FadeIn.duration(400)} style={styles.readerTextBlock}>
@@ -587,7 +701,7 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
 }
 
 function LibraryScreen() {
-  const { texts, annotations, hydrated, updateText } = useSwarLipi();
+  const { texts, annotations, hydrated, updateText, reorderTexts } = useSwarLipi();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string>(ALL_FILTER);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -595,6 +709,7 @@ function LibraryScreen() {
   const [managedText, setManagedText] = useState<SavedText | null>(null);
   const [activeText, setActiveText] = useState<SavedText | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [arrangeOpen, setArrangeOpen] = useState(false);
 
   const filteredTexts = useMemo<SavedText[]>(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -623,6 +738,12 @@ function LibraryScreen() {
     setManagedText(null);
     if (selected) openComposer(selected);
   };
+
+  const closeReader = useCallback((lastReadOffset: number) => {
+    const current = activeText;
+    setActiveText(null);
+    if (current) updateText(current.id, { lastReadOffset: clamp(lastReadOffset, 0, 1) });
+  }, [activeText, updateText]);
 
   if (!hydrated) {
     return (
@@ -666,7 +787,7 @@ function LibraryScreen() {
                 return <Pressable key={option} onPress={() => { feedback.select(); setFilter(option); }} style={({ pressed }) => [styles.filterChip, selected && styles.filterChipSelected, pressed && styles.iconPressed]}><Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>{option}</Text></Pressable>;
               })}
             </ScrollView>
-            <View style={styles.collectionHeading}><View><Text style={styles.collectionTitle}>{filter === ALL_FILTER ? "Your library" : filter}</Text><Text style={styles.collectionCaption}>{filteredTexts.length} text{filteredTexts.length === 1 ? "" : "s"} ready to read</Text></View><MaterialIcons name="tune" size={20} color="#BEACAE" /></View>
+            <View style={styles.collectionHeading}><View><Text style={styles.collectionTitle}>{filter === ALL_FILTER ? "Your library" : filter}</Text><Text style={styles.collectionCaption}>{filteredTexts.length} text{filteredTexts.length === 1 ? "" : "s"} ready to read</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Arrange texts" onPress={() => { feedback.tap(); setArrangeOpen(true); }} hitSlop={10} style={({ pressed }) => [styles.arrangeButton, pressed && styles.iconPressed]}><MaterialIcons name="drag-handle" size={24} color="#F8CCA0" /></Pressable></View>
           </View>
         }
         renderItem={({ item, index }) => <DocumentCard item={item} index={index} annotationCount={annotationCounts[item.id] ?? 0} onOpen={() => setActiveText(item)} onManage={() => setManagedText(item)} />}
@@ -677,7 +798,8 @@ function LibraryScreen() {
       <ComposerSheet visible={composerOpen} editingText={editingText} onDismiss={() => { setComposerOpen(false); setEditingText(null); }} />
       <ManageSheet text={managedText} onDismiss={() => setManagedText(null)} onEdit={openManagedEdit} />
       <SettingsSheet visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} />
-      {activeText ? <Modal visible animationType="none" onRequestClose={() => setActiveText(null)}><ReaderOverlay text={activeText} onClose={(lastReadOffset) => { updateText(activeText.id, { lastReadOffset }); setActiveText(null); }} /></Modal> : null}
+      <ArrangeSheet visible={arrangeOpen} texts={texts} onDismiss={() => setArrangeOpen(false)} onSave={reorderTexts} />
+      {activeText ? <Modal visible animationType="fade" hardwareAccelerated statusBarTranslucent onRequestClose={() => closeReader(activeText.lastReadOffset)}><ReaderOverlay text={activeText} onClose={closeReader} /></Modal> : null}
     </ScreenContainer>
   );
 }
@@ -712,6 +834,7 @@ const styles = StyleSheet.create({
   collectionHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 13 },
   collectionTitle: { color: "#FFF8F2", fontSize: 22, fontWeight: "800", letterSpacing: -0.6 },
   collectionCaption: { color: "#9F9095", fontSize: 12, marginTop: 2 },
+  arrangeButton: { width: 42, height: 42, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "#272028", borderWidth: 1, borderColor: "#3E323C" },
   listContent: { paddingBottom: 112 },
   cardShell: { minHeight: 136, borderRadius: 22, backgroundColor: "#1B161D", borderWidth: 1, borderColor: "#312832", flexDirection: "row", alignItems: "center", padding: 13, marginBottom: 11, overflow: "hidden" },
   pressedCard: { transform: [{ scale: 0.985 }], opacity: 0.88 },
@@ -842,4 +965,19 @@ const styles = StyleSheet.create({
   noteMeta: { color: "#EAB779", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
   noteBody: { color: "#F6E7E0", fontSize: 14, lineHeight: 19, marginTop: 4 },
   emptyNotes: { color: "#AA979E", fontSize: 13, lineHeight: 19, textAlign: "center", paddingVertical: 27, paddingHorizontal: 30 },
+  arrangeRoot: { flex: 1, backgroundColor: "#151116", paddingHorizontal: 20 },
+  arrangeHeader: { paddingTop: Platform.OS === "android" ? 31 : 16, paddingBottom: 18, flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 1, borderBottomColor: "#302630" },
+  arrangeHeaderCopy: { flex: 1 },
+  arrangeTitle: { color: "#FFF8F2", fontSize: 20, fontWeight: "800", letterSpacing: -0.4, marginTop: 2 },
+  arrangeCaption: { color: "#A9999E", fontSize: 13, lineHeight: 19, marginTop: 17, marginBottom: 11, paddingRight: 12 },
+  arrangeList: { paddingTop: 4, paddingBottom: 28 },
+  arrangeCard: { minHeight: 82, borderRadius: 19, backgroundColor: "#211A22", borderWidth: 1, borderColor: "#382D37", flexDirection: "row", alignItems: "center", padding: 10, marginBottom: 10 },
+  arrangeCardActive: { backgroundColor: "#362331", borderColor: "#FFB86A", transform: [{ scale: 1.015 }], shadowColor: "#000", shadowOpacity: 0.28, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 },
+  arrangePosition: { color: "#A8959C", fontSize: 11, fontWeight: "800", width: 19, textAlign: "center" },
+  arrangeAccent: { width: 43, height: 61, borderRadius: 13, alignItems: "center", justifyContent: "center", marginLeft: 6 },
+  arrangeInitial: { color: "#FFF8F2", fontSize: 21, fontWeight: "900" },
+  arrangeCardCopy: { flex: 1, marginLeft: 12, paddingRight: 6 },
+  arrangeCardTitle: { color: "#FFF8F2", fontSize: 15, fontWeight: "800" },
+  arrangeCardMeta: { color: "#B4A2AA", fontSize: 11, marginTop: 5 },
+  dragHandle: { width: 46, height: 58, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: "#2D232C" },
 });

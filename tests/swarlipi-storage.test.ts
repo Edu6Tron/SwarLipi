@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { clamp, createInitialLibrary, decodeLibrary, encodeLibrary } from "../lib/swarlipi-storage";
+import { getReaderMaxOffset, getReaderOffset, getReaderProgress } from "../lib/reader-safety";
+import { clamp, createInitialLibrary, decodeLibrary, encodeLibrary, reorderSavedTexts } from "../lib/swarlipi-storage";
 
 describe("SwarLipi local library format", () => {
   it("round-trips saved text, reader progress, and preferences through device storage data", () => {
@@ -20,6 +21,13 @@ describe("SwarLipi local library format", () => {
     expect(decodeLibrary(JSON.stringify({ texts: [], annotations: [] }))).toBeNull();
     expect(decodeLibrary(null)).toBeNull();
   });
+
+  it("keeps a user-selected ordering stable while retaining any unknown or newly created texts", () => {
+    const texts = createInitialLibrary(1_700_000_000_000).texts;
+    const reordered = reorderSavedTexts(texts, [texts[2].id, texts[0].id, "missing", texts[2].id]);
+
+    expect(reordered.map((text) => text.id)).toEqual([texts[2].id, texts[0].id, texts[1].id, texts[3].id]);
+  });
 });
 
 describe("SwarLipi reader controls", () => {
@@ -28,5 +36,13 @@ describe("SwarLipi reader controls", () => {
     expect(clamp(31, 10, 72)).toBe(31);
     expect(clamp(400, 10, 72)).toBe(72);
     expect(clamp(1.8, 0, 1)).toBe(1);
+  });
+
+  it("does not calculate imperative reader positions before valid layout metrics exist", () => {
+    expect(getReaderMaxOffset(100, 140)).toBe(0);
+    expect(getReaderOffset(0.4, 0)).toBe(0);
+    expect(getReaderProgress(80, 0)).toBe(0);
+    expect(getReaderOffset(0.4, 500)).toBe(200);
+    expect(getReaderProgress(220, 500)).toBe(0.44);
   });
 });
