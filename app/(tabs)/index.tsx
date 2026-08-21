@@ -3,7 +3,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import DraggableFlatList from "react-native-draggable-flatlist";
 import {
   Dimensions,
   FlatList,
@@ -320,6 +319,18 @@ function ArrangeSheet({ visible, texts, onDismiss, onSave }: ArrangeSheetProps) 
     onDismiss();
   }
 
+  function moveText(id: string, direction: -1 | 1) {
+    setDraftTexts((current) => {
+      const index = current.findIndex((text) => text.id === id);
+      const destination = index + direction;
+      if (index < 0 || destination < 0 || destination >= current.length) return current;
+      const next = [...current];
+      [next[index], next[destination]] = [next[destination], next[index]];
+      return next;
+    });
+    feedback.select();
+  }
+
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onDismiss}>
       <StatusBar style="light" />
@@ -336,18 +347,15 @@ function ArrangeSheet({ visible, texts, onDismiss, onSave }: ArrangeSheetProps) 
             <Text style={styles.saveButtonText}>Done</Text>
           </Pressable>
         </View>
-        <Text style={styles.arrangeCaption}>Hold the handle and drag a text into the place that feels right. Your order remains on this device.</Text>
-        <DraggableFlatList
+        <Text style={styles.arrangeCaption}>Use the arrows to move each text up or down. The new order is stored on this device when you tap Done.</Text>
+        <FlatList
           data={draftTexts}
           keyExtractor={(item) => item.id}
-          onDragEnd={({ data }) => setDraftTexts(data)}
-          activationDistance={6}
           contentContainerStyle={styles.arrangeList}
-          renderItem={({ item, drag, isActive, getIndex }) => {
+          renderItem={({ item, index }) => {
             const accent = documentAccent(item.language);
-            const index = getIndex() ?? 0;
             return (
-              <View style={[styles.arrangeCard, isActive && styles.arrangeCardActive]}>
+              <View style={styles.arrangeCard}>
                 <Text style={styles.arrangePosition}>{index + 1}</Text>
                 <LinearGradient colors={accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.arrangeAccent}>
                   <Text style={styles.arrangeInitial}>{item.title.trim().slice(0, 1) || "•"}</Text>
@@ -356,18 +364,26 @@ function ArrangeSheet({ visible, texts, onDismiss, onSave }: ArrangeSheetProps) 
                   <Text numberOfLines={1} style={styles.arrangeCardTitle}>{item.title}</Text>
                   <Text numberOfLines={1} style={styles.arrangeCardMeta}>{item.language} · {formatPreview(item.body)}</Text>
                 </View>
-                <Pressable
-                  accessibilityRole="adjustable"
-                  accessibilityLabel={`Drag ${item.title} to rearrange`}
-                  delayLongPress={90}
-                  onLongPress={() => {
-                    feedback.select();
-                    drag();
-                  }}
-                  style={({ pressed }) => [styles.dragHandle, (pressed || isActive) && styles.iconPressed]}
-                >
-                  <MaterialIcons name="drag-handle" size={28} color="#EAD7D0" />
-                </Pressable>
+                <View style={styles.arrangeMoveColumn}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Move ${item.title} up`}
+                    disabled={index === 0}
+                    onPress={() => moveText(item.id, -1)}
+                    style={({ pressed }) => [styles.arrangeMoveButton, index === 0 && styles.arrangeMoveButtonDisabled, pressed && index > 0 && styles.iconPressed]}
+                  >
+                    <MaterialIcons name="keyboard-arrow-up" size={23} color={index === 0 ? "#6E6168" : "#F9D0A3"} />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Move ${item.title} down`}
+                    disabled={index === draftTexts.length - 1}
+                    onPress={() => moveText(item.id, 1)}
+                    style={({ pressed }) => [styles.arrangeMoveButton, index === draftTexts.length - 1 && styles.arrangeMoveButtonDisabled, pressed && index < draftTexts.length - 1 && styles.iconPressed]}
+                  >
+                    <MaterialIcons name="keyboard-arrow-down" size={23} color={index === draftTexts.length - 1 ? "#6E6168" : "#F9D0A3"} />
+                  </Pressable>
+                </View>
               </View>
             );
           }}
@@ -979,5 +995,7 @@ const styles = StyleSheet.create({
   arrangeCardCopy: { flex: 1, marginLeft: 12, paddingRight: 6 },
   arrangeCardTitle: { color: "#FFF8F2", fontSize: 15, fontWeight: "800" },
   arrangeCardMeta: { color: "#B4A2AA", fontSize: 11, marginTop: 5 },
-  dragHandle: { width: 46, height: 58, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: "#2D232C" },
+  arrangeMoveColumn: { width: 43, alignItems: "center", gap: 3 },
+  arrangeMoveButton: { width: 39, height: 28, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "#2D232C" },
+  arrangeMoveButtonDisabled: { backgroundColor: "#252027", opacity: 0.64 },
 });

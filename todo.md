@@ -19,4 +19,7 @@
 - [x] Diagnose and fix the intermittent Android crash when opening a saved text in the reader
 - [x] Add persistent manual ordering for saved texts with a YouTube-style drag handle and arrangement mode
 - [x] Add deterministic tests for reader lifecycle safety and local text reordering
-- [ ] Validate the crash fix and ordering flow in a signed Android release
+- [x] Validate the crash fix and ordering flow in a signed Android release
+- [x] Diagnose the Android drag-state freeze in the text arrangement screen
+- [x] Replace unreliable gesture drag-and-drop with stable one-step ordering controls that persist locally
+- [ ] Validate the corrected ordering flow and publish a signed Android APK update
