@@ -36,8 +36,9 @@
 - [x] Evaluate opt-in private GitHub repository backups for large SwarLipi libraries
 - [x] Design secure GitHub authorization, encrypted backup packaging, and restore behavior
 - [x] Define user-facing free-tier boundaries between Firebase sync and GitHub backup
-- [ ] Build a polished web-first SwarLipi interface for free GitHub Pages hosting
-- [ ] Add resilient browser-local persistence and a web-friendly immersive reader
-- [ ] Implement client-side encrypted backup packaging and private GitHub backup controls
-- [ ] Add secure GitHub authorization-service scaffolding without exposing credentials
-- [ ] Configure, validate, and publish the GitHub Pages web edition
+- [x] Build a polished web-first SwarLipi interface for free GitHub Pages hosting
+- [x] Add resilient browser-local persistence and a web-friendly immersive reader
+- [x] Implement client-side encrypted backup packaging and private GitHub backup controls
+- [x] Add secure GitHub authorization-service scaffolding without exposing credentials
+- [x] Configure, validate, and publish the GitHub Pages web edition
+- [ ] Configure the optional GitHub App and Cloudflare Worker to activate direct private-repository uploads
