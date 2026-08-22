@@ -3,6 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   KeyboardAvoidingView,
@@ -128,12 +129,12 @@ function annotationLabel(annotation: Annotation) {
   return `${Math.round(annotation.anchorOffset * 100)}% · ${formatUpdated(annotation.createdAt)}`;
 }
 
-function WebLibraryPanel({ textCount, annotationCount }: { textCount: number; annotationCount: number }) {
+function WebLibraryPanel({ textCount, annotationCount, wide }: { textCount: number; annotationCount: number; wide: boolean }) {
   if (Platform.OS !== "web") return null;
   const { session } = useGitHubAccount();
 
   return (
-    <View style={styles.webLibraryPanel}>
+    <View style={[styles.webLibraryPanel, wide ? styles.webLibraryPanelWide : styles.webLibraryPanelNarrow]}>
       <View style={styles.webPanelHalo} />
       <View style={styles.webPanelEyebrowRow}>
         <View style={styles.webPanelStatusDot} />
@@ -542,14 +543,40 @@ function SettingsSheet({ visible, onDismiss, onOpenBackup }: SettingsSheetProps)
   );
 }
 
+type BackupFeedbackKind = "progress" | "success" | "error";
+
+interface BackupFeedback {
+  kind: BackupFeedbackKind;
+  title: string;
+  detail: string;
+}
+
+function BackupFeedbackBanner({ notice }: { notice: BackupFeedback }) {
+  const isProgress = notice.kind === "progress";
+  const isSuccess = notice.kind === "success";
+
+  return (
+    <Animated.View entering={FadeInDown.duration(190)} style={[styles.backupFeedback, isProgress ? styles.backupFeedbackProgress : isSuccess ? styles.backupFeedbackSuccess : styles.backupFeedbackError]} accessibilityLiveRegion="polite">
+      <View style={[styles.backupFeedbackIcon, isProgress ? styles.backupFeedbackIconProgress : isSuccess ? styles.backupFeedbackIconSuccess : styles.backupFeedbackIconError]}>
+        {isProgress ? <ActivityIndicator size="small" color="#F6D5AB" /> : <MaterialIcons name={isSuccess ? "check" : "priority-high"} size={19} color={isSuccess ? "#14251F" : "#3A1519"} />}
+      </View>
+      <View style={styles.backupFeedbackCopy}>
+        <Text style={[styles.backupFeedbackTitle, isProgress && styles.backupFeedbackTitleProgress]}>{notice.title}</Text>
+        <Text style={styles.backupFeedbackDetail}>{notice.detail}</Text>
+      </View>
+    </Animated.View>
+  );
+}
+
 function BackupSheet({ library, onDismiss, visible }: { library: LibraryState; onDismiss: () => void; visible: boolean }) {
   const { replaceLibrary } = useSwarLipi();
   const { chooseRepository, completeSignIn, deviceCode, logout, openSignInPage, session, startSignIn } = useGitHubAccount();
   const [passphrase, setPassphrase] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [repository, setRepository] = useState("");
-  const [message, setMessage] = useState("");
+  const [backupFeedback, setBackupFeedback] = useState<BackupFeedback | null>(null);
   const [working, setWorking] = useState(false);
+  const [activeAction, setActiveAction] = useState<"download" | "sign-in" | "verify" | "repository" | "sync" | "restore" | "apply-restore" | null>(null);
   const [keepSignedIn, setKeepSignedIn] = useState(true);
   const [restoreReady, setRestoreReady] = useState<LibraryState | null>(null);
 
@@ -558,8 +585,9 @@ function BackupSheet({ library, onDismiss, visible }: { library: LibraryState; o
       setPassphrase("");
       setConfirmation("");
       setRepository("");
-      setMessage("");
+      setBackupFeedback(null);
       setWorking(false);
+      setActiveAction(null);
       setRestoreReady(null);
     }
   }, [visible]);
@@ -568,105 +596,143 @@ function BackupSheet({ library, onDismiss, visible }: { library: LibraryState; o
     if (visible && session?.repository) setRepository(session.repository);
   }, [session?.repository, visible]);
 
+  function showFeedback(kind: BackupFeedbackKind, title: string, detail: string) {
+    setBackupFeedback({ kind, title, detail });
+  }
+
+  const setMessage = (detail: string) => showFeedback("error", "Action needs your attention", detail);
+
   async function downloadBackup() {
     if (passphrase !== confirmation) {
-      setMessage("The two passphrases do not match.");
+      showFeedback("error", "Passphrases do not match", "Enter the same backup passphrase in both fields before continuing.");
       feedback.error();
       return;
     }
     setWorking(true);
-    setMessage("Encrypting your library in this browser…");
+    setActiveAction("download");
+    showFeedback("progress", "Creating your encrypted copy", "Your library is encrypted on this device before the file is downloaded.");
     try {
       const encrypted = await createEncryptedLibraryBackup(library, passphrase);
       downloadEncryptedBackup(encrypted);
-      setMessage("Encrypted copy downloaded. GitHub cannot read it without your passphrase.");
+      showFeedback("success", "Encrypted copy downloaded", "Keep the file and passphrase together. GitHub cannot read this copy without the passphrase.");
       feedback.confirm();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Your encrypted backup could not be created.");
+      showFeedback("error", "Encrypted copy not created", error instanceof Error ? error.message : "Please try creating the encrypted backup again.");
       feedback.error();
     } finally {
       setWorking(false);
+      setActiveAction(null);
     }
   }
 
   async function beginSignIn() {
     setWorking(true);
+    setActiveAction("sign-in");
+    showFeedback("progress", "Creating your GitHub code", "A one-time code is being prepared. SwarLipi never asks for your GitHub password.");
     try {
       await startSignIn(keepSignedIn);
-      setMessage("GitHub code created. Open GitHub, enter the code, then return here and check the connection.");
+      showFeedback("success", "GitHub code is ready", "Open GitHub, enter the code, then return here to check the connection.");
+      feedback.confirm();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "GitHub sign-in could not start.");
+      showFeedback("error", "GitHub sign-in did not start", error instanceof Error ? error.message : "Check your connection, then try again.");
+      feedback.error();
     } finally {
       setWorking(false);
+      setActiveAction(null);
     }
   }
 
   async function completeGitHubSignIn() {
     setWorking(true);
+    setActiveAction("verify");
+    showFeedback("progress", "Checking your GitHub confirmation", "Waiting for GitHub to confirm the one-time code.");
     try {
       await completeSignIn();
-      setMessage("GitHub connected. Install the SwarLipi GitHub App on one private repository, then enter it below.");
+      showFeedback("success", "GitHub is connected", "Install the SwarLipi GitHub App on one private repository, then select it below.");
+      feedback.confirm();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "GitHub sign-in could not be completed.");
+      showFeedback("error", "GitHub confirmation not complete", error instanceof Error ? error.message : "Finish the confirmation in GitHub, then check the connection again.");
+      feedback.error();
     } finally {
       setWorking(false);
+      setActiveAction(null);
     }
   }
 
   async function saveRepository() {
     setWorking(true);
+    setActiveAction("repository");
+    showFeedback("progress", "Checking the private repository", "Confirming that the selected repository is private and available to SwarLipi.");
     try {
       await chooseRepository(repository);
-      setMessage("Private repository connected. This device can now sync an encrypted library copy.");
+      showFeedback("success", "Private repository connected", "This device can now sync an encrypted library copy with your other signed-in devices.");
+      feedback.confirm();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The private repository could not be selected.");
+      showFeedback("error", "Private repository not connected", error instanceof Error ? error.message : "Make sure the repository is private and the SwarLipi GitHub App is installed on it.");
+      feedback.error();
     } finally {
       setWorking(false);
+      setActiveAction(null);
     }
   }
 
   async function uploadToGitHub() {
     if (passphrase !== confirmation) {
-      setMessage("The two passphrases do not match.");
+      showFeedback("error", "Passphrases do not match", "Enter the same backup passphrase in both fields before syncing.");
       feedback.error();
       return;
     }
     setWorking(true);
+    setActiveAction("sync");
+    showFeedback("progress", "Encrypting before sync", "Your library is protected on this device before anything is uploaded.");
     try {
       if (!session) throw new Error("Sign in with GitHub before syncing.");
       const encrypted = await createEncryptedLibraryBackup(library, passphrase);
+      showFeedback("progress", "Uploading encrypted library", "Only the unreadable encrypted snapshot is being sent to your private repository.");
       await uploadEncryptedLibrary(session, encrypted);
-      setMessage(`Encrypted library synced to ${session.repository ?? "your private repository"}.`);
+      showFeedback("success", "Encrypted library synced", `A protected snapshot is now stored in ${session.repository ?? "your private repository"}.`);
       feedback.confirm();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The encrypted backup could not be uploaded.");
+      showFeedback("error", "Encrypted sync did not finish", error instanceof Error ? error.message : "Check your connection and repository access, then try syncing again.");
       feedback.error();
     } finally {
       setWorking(false);
+      setActiveAction(null);
     }
   }
 
   async function prepareRestore() {
     setWorking(true);
+    setActiveAction("restore");
+    showFeedback("progress", "Retrieving encrypted library", "Downloading the protected snapshot from your private repository.");
     try {
       if (!session) throw new Error("Sign in with GitHub before restoring.");
       const encrypted = await fetchEncryptedLibrary(session);
+      showFeedback("progress", "Decrypting on this device", "Your passphrase unlocks the snapshot locally. It is never sent to GitHub.");
       const restored = await decryptEncryptedLibraryBackup(encrypted, passphrase);
       setRestoreReady(restored);
-      setMessage(`Remote encrypted library is ready. It contains ${restored.texts.length} texts. Replace this device only if you want to overwrite its current library.`);
+      showFeedback("success", "Restore is ready to review", `The encrypted copy contains ${restored.texts.length} texts. Your current library will remain unchanged until you choose Replace.`);
+      feedback.confirm();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The remote encrypted library could not be restored.");
+      showFeedback("error", "Encrypted restore not prepared", error instanceof Error ? error.message : "Check the passphrase, connection, and repository access, then try again.");
       feedback.error();
     } finally {
       setWorking(false);
+      setActiveAction(null);
     }
   }
 
-  function applyRestore() {
+  async function applyRestore() {
     if (!restoreReady) return;
+    setWorking(true);
+    setActiveAction("apply-restore");
+    showFeedback("progress", "Replacing this device library", "Saving the decrypted copy locally now.");
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     replaceLibrary(restoreReady);
     setRestoreReady(null);
-    setMessage("Your local library was replaced with the decrypted GitHub copy and saved on this device.");
+    setWorking(false);
+    setActiveAction(null);
+    showFeedback("success", "Library restored on this device", "Your local library now matches the decrypted copy from GitHub and is saved for offline reading.");
     feedback.confirm();
   }
 
@@ -693,18 +759,29 @@ function BackupSheet({ library, onDismiss, visible }: { library: LibraryState; o
           <Text style={styles.inputLabel}>BACKUP PASSPHRASE</Text>
           <TextInput value={passphrase} onChangeText={setPassphrase} secureTextEntry placeholder="At least 12 characters" placeholderTextColor="#82757D" style={styles.backupInput} accessibilityLabel="Backup passphrase" />
           <TextInput value={confirmation} onChangeText={setConfirmation} secureTextEntry placeholder="Confirm your passphrase" placeholderTextColor="#82757D" style={[styles.backupInput, styles.backupInputLast]} accessibilityLabel="Confirm backup passphrase" />
-          {message ? <Text style={styles.backupStatus}>{message}</Text> : null}
-          {Platform.OS === "web" ? <Pressable disabled={working} onPress={() => void downloadBackup()} style={({ pressed }) => [styles.backupPrimaryButton, (pressed || working) && styles.saveButtonPressed]}><MaterialIcons name="download" size={20} color="#271116" /><Text style={styles.backupPrimaryButtonText}>{working ? "Encrypting…" : "Download encrypted copy"}</Text></Pressable> : <View style={styles.localBackupNotice}><MaterialIcons name="offline-pin" size={19} color="#FFBF70" /><Text style={styles.localBackupNoticeText}>Your library is saved on this device immediately. Android automatic backup may restore eligible data according to your device backup settings.</Text></View>}
+          {backupFeedback ? <BackupFeedbackBanner notice={backupFeedback} /> : null}
+          {Platform.OS === "web" ? <Pressable disabled={working} onPress={() => void downloadBackup()} style={({ pressed }) => [styles.backupPrimaryButton, (pressed || working) && styles.saveButtonPressed]}>{activeAction === "download" ? <ActivityIndicator size="small" color="#271116" /> : <MaterialIcons name="download" size={20} color="#271116" />}<Text style={styles.backupPrimaryButtonText}>{activeAction === "download" ? "Encrypting securely…" : "Download encrypted copy"}</Text></Pressable> : <View style={styles.localBackupNotice}><MaterialIcons name="offline-pin" size={19} color="#FFBF70" /><Text style={styles.localBackupNoticeText}>Your library is saved on this device immediately. Android automatic backup may restore eligible data according to your device backup settings.</Text></View>}
           <View style={styles.backupDividerRow}><View style={styles.backupDivider} /><Text style={styles.backupDividerText}>ENCRYPTED GITHUB SYNC</Text><View style={styles.backupDivider} /></View>
           <View style={styles.githubConnectionCard}>
             <View style={styles.githubConnectionIcon}><MaterialIcons name="sync-lock" size={21} color="#EADDF7" /></View>
             <View style={styles.githubConnectionCopy}><Text style={styles.githubConnectionTitle}>Private GitHub account sync</Text><Text style={styles.githubConnectionText}>{session ? "Only your selected private repository is used. The file is encrypted before upload." : "Sign in below to connect a private repository under your own GitHub account."}</Text></View>
           </View>
-          {!session ? <View style={styles.githubLoginBlock}>
-            <Text style={styles.inputLabel}>GITHUB SIGN-IN</Text>
-            <Pressable onPress={() => setKeepSignedIn((current) => !current)} style={({ pressed }) => [styles.keepSignedInRow, pressed && styles.iconPressed]}><View style={[styles.keepSignedInBox, keepSignedIn && styles.keepSignedInBoxChecked]}>{keepSignedIn ? <MaterialIcons name="check" size={15} color="#201017" /> : null}</View><View style={styles.keepSignedInCopy}><Text style={styles.keepSignedInTitle}>Keep me signed in on this device</Text><Text style={styles.keepSignedInText}>You can log out at any time from Settings.</Text></View></Pressable>
-            {!deviceCode ? <Pressable disabled={working} onPress={() => void beginSignIn()} style={({ pressed }) => [styles.githubConnectButton, (working || pressed) && styles.saveButtonPressed]}><MaterialIcons name="login" size={19} color="#D9C7F4" /><Text style={styles.githubConnectButtonText}>Sign in with GitHub</Text></Pressable> : <View style={styles.deviceCodeBlock}><Text style={styles.deviceCodeLabel}>ENTER THIS CODE ON GITHUB</Text><Text selectable style={styles.deviceCodeValue}>{deviceCode.userCode}</Text><Pressable onPress={() => void openSignInPage()} style={({ pressed }) => [styles.githubConnectButton, pressed && styles.iconPressed]}><MaterialIcons name="open-in-new" size={19} color="#D9C7F4" /><Text style={styles.githubConnectButtonText}>Open GitHub confirmation</Text></Pressable><Pressable disabled={working} onPress={() => void completeGitHubSignIn()} style={({ pressed }) => [styles.backupUploadButton, (working || pressed) && styles.saveButtonPressed]}><MaterialIcons name="verified-user" size={19} color="#271116" /><Text style={styles.backupPrimaryButtonText}>Check connection</Text></Pressable></View>}
-          </View> : <View style={styles.repositorySetup}><Text style={styles.inputLabel}>PRIVATE REPOSITORY</Text><TextInput value={repository} onChangeText={setRepository} autoCapitalize="none" placeholder="your-handle/SwarLipi-Backups" placeholderTextColor="#82757D" style={styles.backupInput} accessibilityLabel="Private GitHub backup repository" />{githubAppInstallUrl() ? <Pressable onPress={() => void openGitHubAppInstallation().catch((error) => setMessage(error instanceof Error ? error.message : "GitHub App installation could not open."))} style={({ pressed }) => [styles.installAppHint, pressed && styles.iconPressed]}><MaterialIcons name="open-in-new" size={16} color="#CEB8EE" /><Text style={styles.installAppHintText}>Install SwarLipi GitHub App on this private repository first</Text></Pressable> : null}<Pressable disabled={working || !repository.trim()} onPress={() => void saveRepository()} style={({ pressed }) => [styles.githubConnectButton, (!repository.trim() || working || pressed) && styles.saveButtonPressed]}><MaterialIcons name="check-circle-outline" size={19} color="#D9C7F4" /><Text style={styles.githubConnectButtonText}>Use this private repository</Text></Pressable>{session.repository ? <><Pressable disabled={working} onPress={() => void uploadToGitHub()} style={({ pressed }) => [styles.backupUploadButton, (working || pressed) && styles.saveButtonPressed]}><MaterialIcons name="cloud-upload" size={19} color="#271116" /><Text style={styles.backupPrimaryButtonText}>{working ? "Syncing…" : "Sync encrypted library now"}</Text></Pressable><Pressable disabled={working} onPress={() => void prepareRestore()} style={({ pressed }) => [styles.restoreButton, (working || pressed) && styles.saveButtonPressed]}><MaterialIcons name="cloud-download" size={19} color="#D6C5DD" /><Text style={styles.restoreButtonText}>Prepare encrypted restore</Text></Pressable>{restoreReady ? <Pressable onPress={applyRestore} style={({ pressed }) => [styles.replaceLibraryButton, pressed && styles.saveButtonPressed]}><MaterialIcons name="warning-amber" size={19} color="#2B1419" /><Text style={styles.backupPrimaryButtonText}>Replace this device library</Text></Pressable> : null}</> : null}<Pressable onPress={() => void logout().then(() => setMessage("Logged out from GitHub on this device."))} style={({ pressed }) => [styles.disconnectButton, pressed && styles.iconPressed]}><Text style={styles.disconnectButtonText}>Log out of GitHub on this device</Text></Pressable></View>}
+          {!session ? (
+            <View style={styles.githubLoginBlock}>
+              <Text style={styles.inputLabel}>GITHUB SIGN-IN</Text>
+              <Pressable onPress={() => setKeepSignedIn((current) => !current)} style={({ pressed }) => [styles.keepSignedInRow, pressed && styles.iconPressed]}><View style={[styles.keepSignedInBox, keepSignedIn && styles.keepSignedInBoxChecked]}>{keepSignedIn ? <MaterialIcons name="check" size={15} color="#201017" /> : null}</View><View style={styles.keepSignedInCopy}><Text style={styles.keepSignedInTitle}>Keep me signed in on this device</Text><Text style={styles.keepSignedInText}>You can log out at any time from Settings.</Text></View></Pressable>
+              {!deviceCode ? <Pressable disabled={working} onPress={() => void beginSignIn()} style={({ pressed }) => [styles.githubConnectButton, (working || pressed) && styles.saveButtonPressed]}>{activeAction === "sign-in" ? <ActivityIndicator size="small" color="#D9C7F4" /> : <MaterialIcons name="login" size={19} color="#D9C7F4" />}<Text style={styles.githubConnectButtonText}>{activeAction === "sign-in" ? "Creating GitHub code…" : "Sign in with GitHub"}</Text></Pressable> : <View style={styles.deviceCodeBlock}><Text style={styles.deviceCodeLabel}>ENTER THIS CODE ON GITHUB</Text><Text selectable style={styles.deviceCodeValue}>{deviceCode.userCode}</Text><Pressable onPress={() => void openSignInPage()} style={({ pressed }) => [styles.githubConnectButton, pressed && styles.iconPressed]}><MaterialIcons name="open-in-new" size={19} color="#D9C7F4" /><Text style={styles.githubConnectButtonText}>Open GitHub confirmation</Text></Pressable><Pressable disabled={working} onPress={() => void completeGitHubSignIn()} style={({ pressed }) => [styles.backupUploadButton, (working || pressed) && styles.saveButtonPressed]}>{activeAction === "verify" ? <ActivityIndicator size="small" color="#271116" /> : <MaterialIcons name="verified-user" size={19} color="#271116" />}<Text style={styles.backupPrimaryButtonText}>{activeAction === "verify" ? "Checking GitHub…" : "Check connection"}</Text></Pressable></View>}
+            </View>
+          ) : (
+            <View style={styles.repositorySetup}>
+              <Text style={styles.inputLabel}>PRIVATE REPOSITORY</Text>
+              <TextInput value={repository} onChangeText={setRepository} autoCapitalize="none" placeholder="your-handle/SwarLipi-Backups" placeholderTextColor="#82757D" style={styles.backupInput} accessibilityLabel="Private GitHub backup repository" />
+              {githubAppInstallUrl() ? <Pressable onPress={() => void openGitHubAppInstallation().catch((error) => showFeedback("error", "GitHub App did not open", error instanceof Error ? error.message : "Try opening the repository installation page again."))} style={({ pressed }) => [styles.installAppHint, pressed && styles.iconPressed]}><MaterialIcons name="open-in-new" size={16} color="#CEB8EE" /><Text style={styles.installAppHintText}>Install SwarLipi GitHub App on this private repository first</Text></Pressable> : null}
+              <Pressable disabled={working || !repository.trim()} onPress={() => void saveRepository()} style={({ pressed }) => [styles.githubConnectButton, (!repository.trim() || working || pressed) && styles.saveButtonPressed]}>{activeAction === "repository" ? <ActivityIndicator size="small" color="#D9C7F4" /> : <MaterialIcons name="check-circle-outline" size={19} color="#D9C7F4" />}<Text style={styles.githubConnectButtonText}>{activeAction === "repository" ? "Checking private repository…" : "Use this private repository"}</Text></Pressable>
+              {session.repository ? <><Pressable disabled={working} onPress={() => void uploadToGitHub()} style={({ pressed }) => [styles.backupUploadButton, (working || pressed) && styles.saveButtonPressed]}>{activeAction === "sync" ? <ActivityIndicator size="small" color="#271116" /> : <MaterialIcons name="cloud-upload" size={19} color="#271116" />}<Text style={styles.backupPrimaryButtonText}>{activeAction === "sync" ? "Syncing encrypted library…" : "Sync encrypted library now"}</Text></Pressable><Pressable disabled={working} onPress={() => void prepareRestore()} style={({ pressed }) => [styles.restoreButton, (working || pressed) && styles.saveButtonPressed]}>{activeAction === "restore" ? <ActivityIndicator size="small" color="#D6C5DD" /> : <MaterialIcons name="cloud-download" size={19} color="#D6C5DD" />}<Text style={styles.restoreButtonText}>{activeAction === "restore" ? "Preparing secure restore…" : "Prepare encrypted restore"}</Text></Pressable>{restoreReady ? <Pressable disabled={working} onPress={() => void applyRestore()} style={({ pressed }) => [styles.replaceLibraryButton, (pressed || working) && styles.saveButtonPressed]}>{activeAction === "apply-restore" ? <ActivityIndicator size="small" color="#2B1419" /> : <MaterialIcons name="warning-amber" size={19} color="#2B1419" />}<Text style={styles.backupPrimaryButtonText}>{activeAction === "apply-restore" ? "Replacing library…" : "Replace this device library"}</Text></Pressable> : null}</> : null}
+              <Pressable onPress={() => void logout().then(() => showFeedback("success", "Logged out on this device", "Your encrypted repository copy remains untouched and available when you sign in again.")).catch((error) => showFeedback("error", "Log out did not finish", error instanceof Error ? error.message : "Try logging out again."))} style={({ pressed }) => [styles.disconnectButton, pressed && styles.iconPressed]}><Text style={styles.disconnectButtonText}>Log out of GitHub on this device</Text></Pressable>
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
@@ -1031,7 +1108,7 @@ function LibraryScreen() {
                 <Text style={[styles.heroCopy, isWideWeb && styles.webHeroCopy]}>Read gently. Let the text move when you are ready.</Text>
                 <View style={styles.heroStats}><View><Text style={styles.heroStatValue}>{texts.length}</Text><Text style={styles.heroStatLabel}>SAVED TEXTS</Text></View><View style={styles.heroStatDivider} /><View><Text style={styles.heroStatValue}>{languageCount}</Text><Text style={styles.heroStatLabel}>LANGUAGES</Text></View><View style={styles.heroStatDivider} /><View><Text style={styles.heroStatValue}>{annotations.length}</Text><Text style={styles.heroStatLabel}>NOTES</Text></View></View>
               </LinearGradient>
-              <WebLibraryPanel textCount={texts.length} annotationCount={annotations.length} />
+              <WebLibraryPanel textCount={texts.length} annotationCount={annotations.length} wide={isWideWeb} />
             </View>
             <View style={styles.searchBox}><MaterialIcons name="search" size={21} color="#A99A9E" /><TextInput value={query} onChangeText={setQuery} placeholder="Search your words" placeholderTextColor="#877A7E" style={styles.searchInput} returnKeyType="search" accessibilityLabel="Search saved texts" />{query ? <Pressable onPress={() => setQuery("")} hitSlop={8}><MaterialIcons name="close" size={18} color="#A99A9E" /></Pressable> : null}</View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
@@ -1276,6 +1353,18 @@ const styles = StyleSheet.create({
   backupInput: { height: 52, borderRadius: 16, borderWidth: 1, borderColor: "#3B303A", backgroundColor: "#1C171E", color: "#FFF8F2", paddingHorizontal: 15, fontSize: 14, marginBottom: 10 },
   backupInputLast: { marginBottom: 0 },
   backupStatus: { color: "#E7C9A6", fontSize: 12, lineHeight: 17, marginTop: 11 },
+  backupFeedback: { flexDirection: "row", alignItems: "flex-start", gap: 11, borderRadius: 17, borderWidth: 1, padding: 13, marginTop: 12 },
+  backupFeedbackProgress: { backgroundColor: "#272133", borderColor: "#55496B" },
+  backupFeedbackSuccess: { backgroundColor: "#182A26", borderColor: "#3D7667" },
+  backupFeedbackError: { backgroundColor: "#341F27", borderColor: "#7F434F" },
+  backupFeedbackIcon: { width: 29, height: 29, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  backupFeedbackIconProgress: { backgroundColor: "#4D3E62" },
+  backupFeedbackIconSuccess: { backgroundColor: "#82D5BE" },
+  backupFeedbackIconError: { backgroundColor: "#F49A9C" },
+  backupFeedbackCopy: { flex: 1, paddingRight: 2 },
+  backupFeedbackTitle: { color: "#E1F7F0", fontSize: 12, lineHeight: 16, fontWeight: "900" },
+  backupFeedbackTitleProgress: { color: "#F2E4FF" },
+  backupFeedbackDetail: { color: "#C5B6BF", fontSize: 11, lineHeight: 16, marginTop: 2 },
   backupPrimaryButton: { height: 53, borderRadius: 17, backgroundColor: "#FFC071", marginTop: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   backupPrimaryButtonText: { color: "#271116", fontSize: 14, fontWeight: "900" },
   localBackupNotice: { flexDirection: "row", gap: 10, alignItems: "flex-start", padding: 14, borderRadius: 17, marginTop: 18, backgroundColor: "#231C22", borderWidth: 1, borderColor: "#3A3039" },
@@ -1309,7 +1398,9 @@ const styles = StyleSheet.create({
   replaceLibraryButton: { height: 49, borderRadius: 16, backgroundColor: "#F2A36D", marginTop: 10, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
   disconnectButton: { alignSelf: "center", paddingVertical: 14, paddingHorizontal: 10, marginTop: 10 },
   disconnectButtonText: { color: "#E8A4B0", fontSize: 12, fontWeight: "800" },
-  webLibraryPanel: { width: 370, borderRadius: 28, backgroundColor: "#171A21", borderWidth: 1, borderColor: "#3C3D50", padding: 27, overflow: "hidden", justifyContent: "space-between" },
+  webLibraryPanel: { borderRadius: 28, backgroundColor: "#171A21", borderWidth: 1, borderColor: "#3C3D50", padding: 27, overflow: "hidden", justifyContent: "space-between" },
+  webLibraryPanelWide: { width: 370 },
+  webLibraryPanelNarrow: { width: "100%" },
   webPanelHalo: { position: "absolute", width: 220, height: 220, borderRadius: 110, backgroundColor: "rgba(103,115,233,0.13)", right: -92, top: -104 },
   webPanelEyebrowRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   webPanelStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#81D6C5" },

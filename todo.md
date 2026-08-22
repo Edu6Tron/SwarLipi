@@ -41,7 +41,7 @@
 - [x] Implement client-side encrypted backup packaging and private GitHub backup controls
 - [x] Add secure GitHub authorization-service scaffolding without exposing credentials
 - [x] Configure, validate, and publish the GitHub Pages web edition
-- [ ] Configure the optional GitHub App and Cloudflare Worker to activate direct private-repository uploads
+- [x] Retire the optional GitHub App and Cloudflare Worker approach in favor of direct GitHub Device Flow authorization
 - [x] Fix the reader note interface overlapping the reading-progress and scrolling-speed controls on Android
 - [x] Reduce the oversized reader control tray while preserving smooth slider usability
 - [x] Validate and publish the corrected Android reader layout
@@ -52,5 +52,9 @@
 - [x] Connect encrypted Android and browser libraries through the same authorized private GitHub backup repository
 - [x] Add safe encrypted cloud restore and explicit conflict choices for cross-device libraries
 - [x] Redesign GitHub Pages layout for clean narrow-browser and desktop presentation
-- [ ] Validate and publish the authenticated cross-device backup experience
+- [x] Validate and publish the authenticated cross-device backup experience
 - [x] Implement the approved private GitHub account encrypted-sync option across Android and browser
+- [x] Fix the narrow-browser empty column beside the private-library panel on GitHub Pages
+- [ ] Validate and publish the responsive layout correction
+- [x] Add clear animated loading, success, and recovery feedback to encrypted GitHub sync and restore actions
+- [ ] Validate and publish the refined encrypted sync feedback experience
