@@ -173,7 +173,7 @@ function DocumentCard({ item, index, annotationCount, onOpen, onManage }: Docume
           feedback.select();
           onManage();
         }}
-        style={({ pressed, hovered }) => [styles.cardShell, hovered && Platform.OS === "web" && styles.hoverCard, pressed && styles.pressedCard]}
+        style={({ pressed }) => [styles.cardShell, pressed && styles.pressedCard]}
       >
         <LinearGradient colors={accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cardAccent}>
           <Text style={styles.cardInitial}>{item.title.trim().slice(0, 1) || "•"}</Text>
