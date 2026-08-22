@@ -214,7 +214,7 @@ async function downloadLatestBackup(request: Request, env: Env) {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === "OPTIONS") return json({ ok: true }, env, 204);
+    if (request.method === "OPTIONS") return json({ ok: true }, env);
     if (request.method === "GET" && url.pathname === "/health") return json({ ok: true }, env);
     if (request.method === "GET" && url.pathname === "/auth/github/start") return startAuthorization(url, env);
     if (request.method === "GET" && url.pathname === "/auth/github/callback") return finishAuthorization(request, url, env);

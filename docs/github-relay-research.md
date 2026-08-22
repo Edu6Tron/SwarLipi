@@ -16,6 +16,8 @@ The final diagnosis was non-permission related: the relay did not send a `User-A
 
 After the profile lookup succeeded, the return fragment still required a client-side correction: the stay-signed-in choice is now carried inside the signed relay state and returned as its own fragment field rather than relying on a query marker that could be interpreted as part of the encrypted relay session.
 
+The final browser-session persistence fix makes the Worker respond to CORS preflight with a normal JSON `200` response. This avoids browser fetch implementations that reject the prior empty `204` preflight response before the web client can store the encrypted relay session locally.
+
 ## References
 
 [1] [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
