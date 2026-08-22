@@ -44,4 +44,6 @@
 - [ ] Configure the optional GitHub App and Cloudflare Worker to activate direct private-repository uploads
 - [x] Fix the reader note interface overlapping the reading-progress and scrolling-speed controls on Android
 - [x] Reduce the oversized reader control tray while preserving smooth slider usability
-- [ ] Validate and publish the corrected Android reader layout
+- [x] Validate and publish the corrected Android reader layout
+- [x] Generate concise version-specific GitHub Release notes from the changes in each Android build
+- [ ] Validate and publish the improved Android release-note workflow
