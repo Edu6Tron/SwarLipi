@@ -117,7 +117,7 @@ function validReturnUrl(value: string | null, allowedOrigin: string) {
 }
 
 async function githubJson(url: string, accessToken: string, init: RequestInit = {}) {
-  const response = await fetch(url, { ...init, headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${accessToken}`, "X-GitHub-Api-Version": "2022-11-28", ...(init.headers ?? {}) } });
+  const response = await fetch(url, { ...init, headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${accessToken}`, "User-Agent": "SwarLipi-Secure-Sync", "X-GitHub-Api-Version": "2022-11-28", ...(init.headers ?? {}) } });
   const payload = await response.json().catch(() => ({}));
   return { response, payload };
 }

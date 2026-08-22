@@ -12,6 +12,8 @@ The callback rejection was traced to the missing callback cookie rather than a f
 
 The cookie-free callback completed GitHub approval but returned `403` during `GET /user`. GitHub documents that this response can reflect insufficient App permissions and provides the `X-Accepted-GitHub-Permissions` response header for determining the exact required permission. The relay now shows that non-secret header in its diagnostic before any permission expansion is proposed.
 
+The final diagnosis was non-permission related: the relay did not send a `User-Agent` header to GitHub’s REST API. GitHub requires a valid `User-Agent` on every REST request and rejects missing or invalid values with `403 Forbidden`. The relay now sends the descriptive `SwarLipi-Secure-Sync` value. The GitHub App’s permissions, repository scope, and disabled webhooks remain unchanged.
+
 ## References
 
 [1] [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
