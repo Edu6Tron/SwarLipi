@@ -1,0 +1,7 @@
+name = "swarlipi-private-backup"
+main = "src/index.ts"
+compatibility_date = "2026-08-22"
+
+[[kv_namespaces]]
+binding = "CONNECTIONS"
+id = "REPLACE_WITH_YOUR_CLOUDFLARE_KV_NAMESPACE_ID"

@@ -127,6 +127,9 @@ const config: ExpoConfig = {
     ],
   ],
   experiments: {
+    // GitHub Pages hosts this project below https://edu6tron.github.io/SwarLipi.
+    // Keeping this explicit makes generated web assets work on that subpath.
+    baseUrl: "/SwarLipi",
     typedRoutes: true,
     reactCompiler: true,
   },

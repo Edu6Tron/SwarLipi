@@ -29,4 +29,15 @@
 - [x] Replace tap-only reader progress and scrolling-speed controls with smooth drag gestures
 - [x] Add gesture-safe tests for reader slider calculations and drag-state behavior
 - [x] Redesign the reader control tray with a translucent text-through treatment
-- [ ] Validate and publish the smooth-reader-control Android update
+- [x] Validate and publish the smooth-reader-control Android update
+- [x] Evaluate free web hosting, sign-in, and cross-browser text-sync options for SwarLipi
+- [x] Design an offline-friendly data model for optional account-based cloud synchronization
+- [x] Recommend a privacy-conscious free web deployment architecture and implementation path
+- [x] Evaluate opt-in private GitHub repository backups for large SwarLipi libraries
+- [x] Design secure GitHub authorization, encrypted backup packaging, and restore behavior
+- [x] Define user-facing free-tier boundaries between Firebase sync and GitHub backup
+- [ ] Build a polished web-first SwarLipi interface for free GitHub Pages hosting
+- [ ] Add resilient browser-local persistence and a web-friendly immersive reader
+- [ ] Implement client-side encrypted backup packaging and private GitHub backup controls
+- [ ] Add secure GitHub authorization-service scaffolding without exposing credentials
+- [ ] Configure, validate, and publish the GitHub Pages web edition

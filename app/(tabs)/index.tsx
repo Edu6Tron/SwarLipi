@@ -14,15 +14,17 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import Animated, { FadeIn, FadeInDown, FadeOut, SlideInDown, SlideOutDown } from "react-native-reanimated";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { feedback } from "@/lib/haptics";
+import { beginGitHubBackupAuthorization, createEncryptedLibraryBackup, downloadEncryptedBackup, getGitHubBackupServiceUrl, selectGitHubBackupRepository, uploadEncryptedBackupToGitHub } from "@/lib/github-backup";
 import { getReaderMaxOffset, getReaderOffset, getReaderProgress, getReaderScrollRate, getReaderSliderRatio } from "@/lib/reader-safety";
 import { useSwarLipi } from "@/lib/swarlipi-store";
-import { Annotation, clamp, LANGUAGE_OPTIONS, SavedText, TextLanguage } from "@/lib/swarlipi-storage";
+import { Annotation, clamp, LANGUAGE_OPTIONS, LibraryState, SavedText, TextLanguage } from "@/lib/swarlipi-storage";
 
 const { height: WINDOW_HEIGHT } = Dimensions.get("window");
 const ALL_FILTER = "All";
@@ -124,6 +126,29 @@ function annotationLabel(annotation: Annotation) {
   return `${Math.round(annotation.anchorOffset * 100)}% · ${formatUpdated(annotation.createdAt)}`;
 }
 
+function WebLibraryPanel({ textCount, annotationCount }: { textCount: number; annotationCount: number }) {
+  if (Platform.OS !== "web") return null;
+
+  return (
+    <View style={styles.webLibraryPanel}>
+      <View style={styles.webPanelHalo} />
+      <View style={styles.webPanelEyebrowRow}>
+        <View style={styles.webPanelStatusDot} />
+        <Text style={styles.webPanelEyebrow}>YOUR PRIVATE SPACE</Text>
+      </View>
+      <Text style={styles.webPanelTitle}>Your library stays with you.</Text>
+      <Text style={styles.webPanelCopy}>Everything is saved in this browser first. A private GitHub backup can keep an encrypted recovery copy under your own account.</Text>
+      <View style={styles.webPanelDivider} />
+      <View style={styles.webPanelMetrics}>
+        <View style={styles.webPanelMetric}><MaterialIcons name="auto-stories" size={17} color="#F7BD71" /><Text style={styles.webPanelMetricValue}>{textCount}</Text><Text style={styles.webPanelMetricLabel}>TEXTS</Text></View>
+        <View style={styles.webPanelMetric}><MaterialIcons name="mode-comment" size={17} color="#A8B2F6" /><Text style={styles.webPanelMetricValue}>{annotationCount}</Text><Text style={styles.webPanelMetricLabel}>NOTES</Text></View>
+        <View style={styles.webPanelMetric}><MaterialIcons name="lock-outline" size={17} color="#9DE4D7" /><Text style={styles.webPanelMetricValue}>ON</Text><Text style={styles.webPanelMetricLabel}>LOCAL SAVE</Text></View>
+      </View>
+      <View style={styles.webPanelFooter}><MaterialIcons name="verified-user" size={16} color="#9DE4D7" /><Text style={styles.webPanelFooterText}>Private by default. No ads. No public feed.</Text></View>
+    </View>
+  );
+}
+
 interface DocumentCardProps {
   item: SavedText;
   index: number;
@@ -148,7 +173,7 @@ function DocumentCard({ item, index, annotationCount, onOpen, onManage }: Docume
           feedback.select();
           onManage();
         }}
-        style={({ pressed }) => [styles.cardShell, pressed && styles.pressedCard]}
+        style={({ pressed, hovered }) => [styles.cardShell, hovered && Platform.OS === "web" && styles.hoverCard, pressed && styles.pressedCard]}
       >
         <LinearGradient colors={accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cardAccent}>
           <Text style={styles.cardInitial}>{item.title.trim().slice(0, 1) || "•"}</Text>
@@ -296,7 +321,7 @@ function ComposerSheet({ visible, editingText, onDismiss }: ComposerSheetProps) 
 
           <View style={styles.localOnlyNote}>
             <MaterialIcons name="offline-pin" size={18} color="#FFBF68" />
-            <Text style={styles.localOnlyText}>Saved privately on this device. No connection is needed.</Text>
+            <Text style={styles.localOnlyText}>{Platform.OS === "web" ? "Saved privately in this browser. You can add an encrypted private GitHub backup whenever you are ready." : "Saved privately on this device. No connection is needed."}</Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -459,9 +484,10 @@ function ArrangeSheet({ visible, texts, onDismiss, onSave }: ArrangeSheetProps) 
 interface SettingsSheetProps {
   visible: boolean;
   onDismiss: () => void;
+  onOpenBackup: () => void;
 }
 
-function SettingsSheet({ visible, onDismiss }: SettingsSheetProps) {
+function SettingsSheet({ visible, onDismiss, onOpenBackup }: SettingsSheetProps) {
   const { preferences, setPreferences } = useSwarLipi();
   const smaller = () => setPreferences({ fontScale: clamp(Number((preferences.fontScale - 0.1).toFixed(2)), 0.9, 1.2) });
   const larger = () => setPreferences({ fontScale: clamp(Number((preferences.fontScale + 0.1).toFixed(2)), 0.9, 1.2) });
@@ -485,18 +511,148 @@ function SettingsSheet({ visible, onDismiss }: SettingsSheetProps) {
               <Pressable onPress={larger} style={({ pressed }) => [styles.fontStep, pressed && styles.iconPressed]}><Text style={styles.fontStepText}>A+</Text></Pressable>
             </View>
           </View>
-          <View style={styles.backupCard}>
-            <MaterialIcons name="cloud-done" size={21} color="#FFBE69" />
+          <Pressable onPress={onOpenBackup} style={({ pressed }) => [styles.backupCard, pressed && styles.backupCardPressed]}>
+            <MaterialIcons name={Platform.OS === "web" ? "lock-outline" : "cloud-done"} size={21} color="#FFBE69" />
             <View style={styles.backupCopy}>
-              <Text style={styles.backupTitle}>Device backup support</Text>
-              <Text style={styles.backupText}>Your library is saved on this device immediately. Android automatic backup is enabled for eligible app data; restoration after reinstall depends on your device backup settings.</Text>
+              <Text style={styles.backupTitle}>{Platform.OS === "web" ? "Encrypted private backup" : "Device backup support"}</Text>
+              <Text style={styles.backupText}>{Platform.OS === "web" ? "Create an unreadable recovery copy for your private GitHub repository. Your texts are encrypted before upload." : "Your library is saved on this device immediately. Android automatic backup is enabled for eligible app data; restoration after reinstall depends on your device backup settings."}</Text>
             </View>
-          </View>
+            <MaterialIcons name="chevron-right" size={21} color="#B9A6AB" />
+          </Pressable>
           <Pressable onPress={onDismiss} style={({ pressed }) => [styles.doneSettingsButton, pressed && styles.iconPressed]}>
             <Text style={styles.doneSettingsText}>Done</Text>
           </Pressable>
         </Animated.View>
       </View>
+    </Modal>
+  );
+}
+
+function BackupSheet({ library, onDismiss, visible }: { library: LibraryState; onDismiss: () => void; visible: boolean }) {
+  const [passphrase, setPassphrase] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [repository, setRepository] = useState("");
+  const [message, setMessage] = useState("");
+  const [working, setWorking] = useState(false);
+  const hasConnectionService = Boolean(getGitHubBackupServiceUrl());
+  const [githubConnected, setGitHubConnected] = useState(false);
+
+  useEffect(() => {
+    if (!visible) {
+      setPassphrase("");
+      setConfirmation("");
+      setRepository("");
+      setMessage("");
+      setWorking(false);
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || Platform.OS !== "web") return;
+    const url = new URL(globalThis.location.href);
+    if (url.searchParams.get("githubBackup") !== "connected") return;
+    url.searchParams.delete("githubBackup");
+    globalThis.history.replaceState({}, "", url.toString());
+    setGitHubConnected(true);
+    setMessage("GitHub connected. Choose the private repository that will hold your encrypted backups.");
+  }, [visible]);
+
+  async function downloadBackup() {
+    if (passphrase !== confirmation) {
+      setMessage("The two passphrases do not match.");
+      feedback.error();
+      return;
+    }
+    setWorking(true);
+    setMessage("Encrypting your library in this browser…");
+    try {
+      const encrypted = await createEncryptedLibraryBackup(library, passphrase);
+      downloadEncryptedBackup(encrypted);
+      setMessage("Encrypted copy downloaded. GitHub cannot read it without your passphrase.");
+      feedback.confirm();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Your encrypted backup could not be created.");
+      feedback.error();
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  function connectGitHub() {
+    try {
+      beginGitHubBackupAuthorization();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "GitHub connection could not start.");
+    }
+  }
+
+  async function saveRepository() {
+    setWorking(true);
+    try {
+      const result = await selectGitHubBackupRepository(repository);
+      setRepository(result.repository ?? repository);
+      setMessage("Private repository selected. You can now create an encrypted backup there.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The private repository could not be selected.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function uploadToGitHub() {
+    if (passphrase !== confirmation) {
+      setMessage("The two passphrases do not match.");
+      feedback.error();
+      return;
+    }
+    setWorking(true);
+    try {
+      const encrypted = await createEncryptedLibraryBackup(library, passphrase);
+      const result = await uploadEncryptedBackupToGitHub(encrypted);
+      setMessage(`Encrypted backup saved to ${result.repository ?? "your private repository"}.`);
+      feedback.confirm();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The encrypted backup could not be uploaded.");
+      feedback.error();
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onDismiss}>
+      <StatusBar style="light" />
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.backupRoot}>
+        <View style={styles.backupHeader}>
+          <Pressable onPress={onDismiss} hitSlop={12} style={({ pressed }) => [styles.roundIcon, pressed && styles.iconPressed]}><MaterialIcons name="close" size={22} color="#FFF8F2" /></Pressable>
+          <View style={styles.backupHeaderCopy}><Text style={styles.composerEyebrow}>YOUR LIBRARY, YOUR CONTROL</Text><Text style={styles.backupHeading}>Private backup</Text></View>
+          <View style={styles.backupHeaderSeal}><MaterialIcons name="lock" size={17} color="#1F151A" /></View>
+        </View>
+        <ScrollView contentContainerStyle={styles.backupScroll} keyboardShouldPersistTaps="handled">
+          <LinearGradient colors={["#2E223C", "#34212C", "#231A27"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.backupHero}>
+            <View style={styles.backupHeroOrb} />
+            <MaterialIcons name="enhanced-encryption" size={27} color="#FFCA83" />
+            <Text style={styles.backupHeroTitle}>Encrypt before it leaves your browser.</Text>
+            <Text style={styles.backupHeroText}>Your passphrase stays with you. GitHub only receives an unreadable backup file in your private repository.</Text>
+          </LinearGradient>
+          <View style={styles.backupSteps}>
+            <View style={styles.backupStep}><Text style={styles.backupStepNumber}>01</Text><View style={styles.backupStepCopy}><Text style={styles.backupStepTitle}>Create a recovery copy</Text><Text style={styles.backupStepText}>Use a passphrase of at least 12 characters. SwarLipi never saves it.</Text></View></View>
+            <View style={styles.backupStep}><Text style={styles.backupStepNumber}>02</Text><View style={styles.backupStepCopy}><Text style={styles.backupStepTitle}>Keep the passphrase safe</Text><Text style={styles.backupStepText}>If it is lost, neither SwarLipi nor GitHub can unlock this backup.</Text></View></View>
+          </View>
+          <Text style={styles.inputLabel}>BACKUP PASSPHRASE</Text>
+          <TextInput value={passphrase} onChangeText={setPassphrase} secureTextEntry placeholder="At least 12 characters" placeholderTextColor="#82757D" style={styles.backupInput} accessibilityLabel="Backup passphrase" />
+          <TextInput value={confirmation} onChangeText={setConfirmation} secureTextEntry placeholder="Confirm your passphrase" placeholderTextColor="#82757D" style={[styles.backupInput, styles.backupInputLast]} accessibilityLabel="Confirm backup passphrase" />
+          {message ? <Text style={styles.backupStatus}>{message}</Text> : null}
+          <Pressable disabled={working || Platform.OS !== "web"} onPress={() => void downloadBackup()} style={({ pressed }) => [styles.backupPrimaryButton, (pressed || working || Platform.OS !== "web") && styles.saveButtonPressed]}><MaterialIcons name="download" size={20} color="#271116" /><Text style={styles.backupPrimaryButtonText}>{working ? "Encrypting…" : "Download encrypted copy"}</Text></Pressable>
+          <View style={styles.backupDividerRow}><View style={styles.backupDivider} /><Text style={styles.backupDividerText}>THEN, IF YOU WANT</Text><View style={styles.backupDivider} /></View>
+          <View style={styles.githubConnectionCard}>
+            <View style={styles.githubConnectionIcon}><MaterialIcons name="code" size={21} color="#EADDF7" /></View>
+            <View style={styles.githubConnectionCopy}><Text style={styles.githubConnectionTitle}>Back up to your private GitHub repository</Text><Text style={styles.githubConnectionText}>{hasConnectionService ? "Connect a repository you own. SwarLipi will request only read and write access to that selected backup repository." : "Your encrypted download works now. Private-repository upload is enabled after a one-time GitHub App connection service setup."}</Text></View>
+          </View>
+          {hasConnectionService && !githubConnected ? <Pressable onPress={connectGitHub} style={({ pressed }) => [styles.githubConnectButton, pressed && styles.iconPressed]}><MaterialIcons name="link" size={19} color="#D9C7F4" /><Text style={styles.githubConnectButtonText}>Connect private repository</Text></Pressable> : null}
+          {hasConnectionService && githubConnected ? <View style={styles.repositorySetup}><Text style={styles.inputLabel}>PRIVATE REPOSITORY</Text><TextInput value={repository} onChangeText={setRepository} autoCapitalize="none" placeholder="your-handle/SwarLipi-Backups" placeholderTextColor="#82757D" style={styles.backupInput} accessibilityLabel="Private GitHub backup repository" /><Pressable disabled={working || !repository.trim()} onPress={() => void saveRepository()} style={({ pressed }) => [styles.githubConnectButton, (!repository.trim() || working || pressed) && styles.saveButtonPressed]}><MaterialIcons name="check-circle-outline" size={19} color="#D9C7F4" /><Text style={styles.githubConnectButtonText}>Use this private repository</Text></Pressable>{repository.includes("/") ? <Pressable disabled={working} onPress={() => void uploadToGitHub()} style={({ pressed }) => [styles.backupUploadButton, (working || pressed) && styles.saveButtonPressed]}><MaterialIcons name="backup" size={19} color="#271116" /><Text style={styles.backupPrimaryButtonText}>{working ? "Saving…" : "Back up encrypted copy"}</Text></Pressable> : null}</View> : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -737,7 +893,9 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
 }
 
 function LibraryScreen() {
-  const { texts, annotations, hydrated, updateText, reorderTexts } = useSwarLipi();
+  const { texts, annotations, hydrated, preferences, updateText, reorderTexts } = useSwarLipi();
+  const { width } = useWindowDimensions();
+  const isWideWeb = Platform.OS === "web" && width >= 980;
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string>(ALL_FILTER);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -746,6 +904,8 @@ function LibraryScreen() {
   const [activeText, setActiveText] = useState<SavedText | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [arrangeOpen, setArrangeOpen] = useState(false);
+  const [backupOpen, setBackupOpen] = useState(false);
+  const backupLibrary = useMemo<LibraryState>(() => ({ texts, annotations, preferences }), [annotations, preferences, texts]);
 
   const filteredTexts = useMemo<SavedText[]>(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -800,22 +960,25 @@ function LibraryScreen() {
       <FlatList
         data={filteredTexts}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, isWideWeb && styles.webListContent]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View>
             <View style={styles.topBar}>
-              <View style={styles.brandLockup}><View style={styles.brandMark}><MaterialIcons name="menu-book" size={22} color="#1B1015" /></View><Text style={styles.brandText}>SwarLipi</Text></View>
-              <Pressable accessibilityLabel="Open preferences" onPress={() => { feedback.tap(); setSettingsOpen(true); }} style={({ pressed }) => [styles.roundIcon, pressed && styles.iconPressed]}><MaterialIcons name="settings" size={22} color="#FFF8F2" /></Pressable>
+              <View style={styles.brandLockup}><View style={styles.brandMark}><MaterialIcons name="menu-book" size={22} color="#1B1015" /></View><View><Text style={styles.brandText}>SwarLipi</Text>{Platform.OS === "web" ? <Text style={styles.webBrandCaption}>YOUR WORDS, YOUR SPACE</Text> : null}</View></View>
+              <View style={styles.topBarActions}>{Platform.OS === "web" ? <View style={styles.localStatus}><View style={styles.localStatusDot} /><Text style={styles.localStatusText}>Saved locally</Text></View> : null}<Pressable accessibilityLabel="Open preferences" onPress={() => { feedback.tap(); setSettingsOpen(true); }} style={({ pressed }) => [styles.roundIcon, pressed && styles.iconPressed]}><MaterialIcons name="settings" size={22} color="#FFF8F2" /></Pressable></View>
             </View>
-            <LinearGradient colors={["#481225", "#7B2337", "#A54A42"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroCard}>
-              <View style={styles.heroDotOne} /><View style={styles.heroDotTwo} />
-              <Text style={styles.heroEyebrow}>YOUR PRIVATE WORDS, IN MOTION</Text>
-              <Text style={styles.heroTitle}>A beautiful place{`\n`}to return to.</Text>
-              <Text style={styles.heroCopy}>Read gently. Let the text move when you are ready.</Text>
-              <View style={styles.heroStats}><View><Text style={styles.heroStatValue}>{texts.length}</Text><Text style={styles.heroStatLabel}>SAVED TEXTS</Text></View><View style={styles.heroStatDivider} /><View><Text style={styles.heroStatValue}>{languageCount}</Text><Text style={styles.heroStatLabel}>LANGUAGES</Text></View><View style={styles.heroStatDivider} /><View><Text style={styles.heroStatValue}>{annotations.length}</Text><Text style={styles.heroStatLabel}>NOTES</Text></View></View>
-            </LinearGradient>
+            <View style={[styles.heroLayout, isWideWeb && styles.webHeroLayout]}>
+              <LinearGradient colors={["#481225", "#7B2337", "#A54A42"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.heroCard, isWideWeb && styles.webHeroCard]}>
+                <View style={styles.heroDotOne} /><View style={styles.heroDotTwo} />
+                <Text style={styles.heroEyebrow}>YOUR PRIVATE WORDS, IN MOTION</Text>
+                <Text style={styles.heroTitle}>A beautiful place{`\n`}to return to.</Text>
+                <Text style={styles.heroCopy}>Read gently. Let the text move when you are ready.</Text>
+                <View style={styles.heroStats}><View><Text style={styles.heroStatValue}>{texts.length}</Text><Text style={styles.heroStatLabel}>SAVED TEXTS</Text></View><View style={styles.heroStatDivider} /><View><Text style={styles.heroStatValue}>{languageCount}</Text><Text style={styles.heroStatLabel}>LANGUAGES</Text></View><View style={styles.heroStatDivider} /><View><Text style={styles.heroStatValue}>{annotations.length}</Text><Text style={styles.heroStatLabel}>NOTES</Text></View></View>
+              </LinearGradient>
+              <WebLibraryPanel textCount={texts.length} annotationCount={annotations.length} />
+            </View>
             <View style={styles.searchBox}><MaterialIcons name="search" size={21} color="#A99A9E" /><TextInput value={query} onChangeText={setQuery} placeholder="Search your words" placeholderTextColor="#877A7E" style={styles.searchInput} returnKeyType="search" accessibilityLabel="Search saved texts" />{query ? <Pressable onPress={() => setQuery("")} hitSlop={8}><MaterialIcons name="close" size={18} color="#A99A9E" /></Pressable> : null}</View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
               {[ALL_FILTER, ...LANGUAGE_OPTIONS].map((option) => {
@@ -829,11 +992,12 @@ function LibraryScreen() {
         renderItem={({ item, index }) => <DocumentCard item={item} index={index} annotationCount={annotationCounts[item.id] ?? 0} onOpen={() => setActiveText(item)} onManage={() => setManagedText(item)} />}
         ListEmptyComponent={<View style={styles.emptyLibrary}><LinearGradient colors={["#512037", "#2E1A27"]} style={styles.emptyIcon}><MaterialIcons name="auto-stories" size={30} color="#FFC370" /></LinearGradient><Text style={styles.emptyTitle}>No matching words yet</Text><Text style={styles.emptyCopy}>Try another search, or save a new text to begin.</Text></View>}
       />
-      <Pressable accessibilityRole="button" accessibilityLabel="Save a new text" onPress={() => { feedback.tap(); openComposer(); }} style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}><MaterialIcons name="add" size={28} color="#281116" /><Text style={styles.fabText}>New text</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Save a new text" onPress={() => { feedback.tap(); openComposer(); }} style={({ pressed }) => [styles.fab, isWideWeb && styles.webFab, pressed && styles.fabPressed]}><MaterialIcons name="add" size={28} color="#281116" /><Text style={styles.fabText}>New text</Text></Pressable>
 
       <ComposerSheet visible={composerOpen} editingText={editingText} onDismiss={() => { setComposerOpen(false); setEditingText(null); }} />
       <ManageSheet text={managedText} onDismiss={() => setManagedText(null)} onEdit={openManagedEdit} />
-      <SettingsSheet visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} />
+      <SettingsSheet visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} onOpenBackup={() => { setSettingsOpen(false); setBackupOpen(true); }} />
+      <BackupSheet visible={backupOpen} library={backupLibrary} onDismiss={() => setBackupOpen(false)} />
       <ArrangeSheet visible={arrangeOpen} texts={texts} onDismiss={() => setArrangeOpen(false)} onSave={reorderTexts} />
       {activeText ? <ReaderOverlay text={activeText} onClose={closeReader} /> : null}
     </ScreenContainer>
@@ -846,11 +1010,19 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 4, marginBottom: 18 },
+  topBarActions: { flexDirection: "row", alignItems: "center", gap: 10 },
   brandLockup: { flexDirection: "row", alignItems: "center", gap: 9 },
   brandMark: { width: 37, height: 37, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: "#FFBD6A" },
   brandText: { color: "#FFF8F2", fontSize: 22, fontWeight: "800", letterSpacing: -0.7 },
+  webBrandCaption: { color: "#9E8B92", fontSize: 8, fontWeight: "800", letterSpacing: 1.1, marginTop: 1 },
+  localStatus: { height: 35, borderRadius: 18, paddingHorizontal: 11, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#1C2524", borderWidth: 1, borderColor: "#30443F" },
+  localStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#83D5C5" },
+  localStatusText: { color: "#B9E7DE", fontSize: 11, fontWeight: "800" },
   roundIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "#211921", borderWidth: 1, borderColor: "#3C3038" },
+  heroLayout: { marginBottom: 18 },
+  webHeroLayout: { flexDirection: "row", gap: 16, alignItems: "stretch" },
   heroCard: { borderRadius: 28, minHeight: 238, padding: 24, overflow: "hidden", marginBottom: 18 },
+  webHeroCard: { flex: 1, marginBottom: 0, minHeight: 266, padding: 30 },
   heroDotOne: { position: "absolute", width: 150, height: 150, borderRadius: 75, backgroundColor: "rgba(255,193,112,0.18)", top: -61, right: -39 },
   heroDotTwo: { position: "absolute", width: 100, height: 100, borderRadius: 50, backgroundColor: "rgba(255,244,222,0.10)", bottom: -55, left: 112 },
   heroEyebrow: { color: "#FFD7A8", fontSize: 10, fontWeight: "800", letterSpacing: 1.3, marginBottom: 12 },
@@ -872,7 +1044,9 @@ const styles = StyleSheet.create({
   collectionCaption: { color: "#9F9095", fontSize: 12, marginTop: 2 },
   arrangeButton: { width: 42, height: 42, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "#272028", borderWidth: 1, borderColor: "#3E323C" },
   listContent: { paddingBottom: 112 },
+  webListContent: { width: "100%", maxWidth: 1180, alignSelf: "center", paddingBottom: 136 },
   cardShell: { minHeight: 136, borderRadius: 22, backgroundColor: "#1B161D", borderWidth: 1, borderColor: "#312832", flexDirection: "row", alignItems: "center", padding: 13, marginBottom: 11, overflow: "hidden" },
+  hoverCard: { backgroundColor: "#211A22", borderColor: "#5B414D", transform: [{ translateY: -1 }] },
   pressedCard: { transform: [{ scale: 0.985 }], opacity: 0.88 },
   cardAccent: { width: 62, height: 104, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   cardInitial: { color: "#FFF8F2", fontSize: 28, fontWeight: "800" },
@@ -890,6 +1064,7 @@ const styles = StyleSheet.create({
   cardMore: { width: 30, height: 42, justifyContent: "center", alignItems: "center" },
   iconPressed: { opacity: 0.6, transform: [{ scale: 0.97 }] },
   fab: { position: "absolute", right: 20, bottom: 20, height: 55, paddingHorizontal: 19, borderRadius: 28, backgroundColor: "#FFC071", flexDirection: "row", alignItems: "center", gap: 7, shadowColor: "#000", shadowOpacity: 0.38, shadowRadius: 14, shadowOffset: { width: 0, height: 8 }, elevation: 8 },
+  webFab: { right: 36, bottom: 28, height: 58, paddingHorizontal: 23, shadowOpacity: 0.5, shadowRadius: 18 },
   fabPressed: { transform: [{ scale: 0.97 }], opacity: 0.92 },
   fabText: { color: "#261116", fontSize: 14, fontWeight: "800" },
   emptyLibrary: { alignItems: "center", paddingTop: 60, paddingHorizontal: 38 },
@@ -943,6 +1118,7 @@ const styles = StyleSheet.create({
   fontStepText: { color: "#FFE6C4", fontSize: 12, fontWeight: "800" },
   fontPercent: { color: "#F6C37D", fontSize: 12, fontWeight: "800", width: 33, textAlign: "center" },
   backupCard: { flexDirection: "row", gap: 12, borderRadius: 18, padding: 15, backgroundColor: "#2B2430", marginTop: 17 },
+  backupCardPressed: { backgroundColor: "#372A39", transform: [{ scale: 0.99 }] },
   backupCopy: { flex: 1 },
   backupTitle: { color: "#FFE2B4", fontSize: 13, fontWeight: "800" },
   backupText: { color: "#C1B0B4", fontSize: 12, lineHeight: 17, marginTop: 4 },
@@ -1020,4 +1196,51 @@ const styles = StyleSheet.create({
   arrangeMoveColumn: { width: 43, alignItems: "center", gap: 3 },
   arrangeMoveButton: { width: 39, height: 28, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "#2D232C" },
   arrangeMoveButtonDisabled: { backgroundColor: "#252027", opacity: 0.64 },
+  backupRoot: { flex: 1, backgroundColor: "#141116" },
+  backupHeader: { paddingHorizontal: 20, paddingTop: Platform.OS === "android" ? 28 : 16, paddingBottom: 17, flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 1, borderBottomColor: "#2E2630" },
+  backupHeaderCopy: { flex: 1 },
+  backupHeading: { color: "#FFF8F2", fontSize: 19, fontWeight: "800", letterSpacing: -0.4, marginTop: 2 },
+  backupHeaderSeal: { width: 38, height: 38, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#FFBF70" },
+  backupScroll: { padding: 22, paddingBottom: 44 },
+  backupHero: { borderRadius: 24, padding: 20, overflow: "hidden" },
+  backupHeroOrb: { position: "absolute", width: 155, height: 155, borderRadius: 78, backgroundColor: "rgba(255,194,125,0.11)", right: -64, top: -70 },
+  backupHeroTitle: { color: "#FFF7F2", fontSize: 23, fontWeight: "800", letterSpacing: -0.7, marginTop: 12, maxWidth: 265 },
+  backupHeroText: { color: "#DBCBD9", fontSize: 13, lineHeight: 19, marginTop: 8, maxWidth: 300 },
+  backupSteps: { marginVertical: 23, gap: 16 },
+  backupStep: { flexDirection: "row", gap: 12 },
+  backupStepNumber: { color: "#F6BE74", fontSize: 11, fontWeight: "900", letterSpacing: 0.8, width: 23, marginTop: 2 },
+  backupStepCopy: { flex: 1 },
+  backupStepTitle: { color: "#FFF8F2", fontSize: 14, fontWeight: "800" },
+  backupStepText: { color: "#AA9BA2", fontSize: 12, lineHeight: 17, marginTop: 3 },
+  backupInput: { height: 52, borderRadius: 16, borderWidth: 1, borderColor: "#3B303A", backgroundColor: "#1C171E", color: "#FFF8F2", paddingHorizontal: 15, fontSize: 14, marginBottom: 10 },
+  backupInputLast: { marginBottom: 0 },
+  backupStatus: { color: "#E7C9A6", fontSize: 12, lineHeight: 17, marginTop: 11 },
+  backupPrimaryButton: { height: 53, borderRadius: 17, backgroundColor: "#FFC071", marginTop: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  backupPrimaryButtonText: { color: "#271116", fontSize: 14, fontWeight: "900" },
+  backupDividerRow: { flexDirection: "row", alignItems: "center", gap: 9, marginVertical: 23 },
+  backupDivider: { flex: 1, height: 1, backgroundColor: "#352B35" },
+  backupDividerText: { color: "#887B82", fontSize: 8, fontWeight: "900", letterSpacing: 0.9 },
+  githubConnectionCard: { flexDirection: "row", gap: 12, padding: 15, borderRadius: 19, backgroundColor: "#1B2028", borderWidth: 1, borderColor: "#303948" },
+  githubConnectionIcon: { width: 37, height: 37, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "#30273A" },
+  githubConnectionCopy: { flex: 1 },
+  githubConnectionTitle: { color: "#EEE6F7", fontSize: 13, lineHeight: 17, fontWeight: "800" },
+  githubConnectionText: { color: "#AEA6B7", fontSize: 11, lineHeight: 16, marginTop: 4 },
+  githubConnectButton: { height: 48, borderRadius: 16, backgroundColor: "#2C2535", borderWidth: 1, borderColor: "#544363", marginTop: 10, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
+  githubConnectButtonText: { color: "#DECDF2", fontSize: 13, fontWeight: "800" },
+  repositorySetup: { marginTop: 16 },
+  backupUploadButton: { height: 49, borderRadius: 16, backgroundColor: "#FFC071", marginTop: 10, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
+  webLibraryPanel: { width: 330, borderRadius: 28, backgroundColor: "#171A21", borderWidth: 1, borderColor: "#333543", padding: 24, overflow: "hidden" },
+  webPanelHalo: { position: "absolute", width: 220, height: 220, borderRadius: 110, backgroundColor: "rgba(103,115,233,0.13)", right: -92, top: -104 },
+  webPanelEyebrowRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  webPanelStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#81D6C5" },
+  webPanelEyebrow: { color: "#AAB5F9", fontSize: 9, letterSpacing: 1.1, fontWeight: "900" },
+  webPanelTitle: { color: "#FFF8F2", fontSize: 22, lineHeight: 27, fontWeight: "800", letterSpacing: -0.6, marginTop: 15, maxWidth: 220 },
+  webPanelCopy: { color: "#B7AAB0", fontSize: 12, lineHeight: 18, marginTop: 9 },
+  webPanelDivider: { height: 1, backgroundColor: "#343542", marginVertical: 18 },
+  webPanelMetrics: { flexDirection: "row", justifyContent: "space-between" },
+  webPanelMetric: { alignItems: "flex-start", gap: 4 },
+  webPanelMetricValue: { color: "#FFF8F2", fontSize: 16, fontWeight: "900", marginTop: 2 },
+  webPanelMetricLabel: { color: "#958990", fontSize: 8, fontWeight: "900", letterSpacing: 0.8 },
+  webPanelFooter: { marginTop: 18, flexDirection: "row", alignItems: "center", gap: 7 },
+  webPanelFooterText: { color: "#A7D9D0", fontSize: 10, fontWeight: "700", flex: 1 },
 });
