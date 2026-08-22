@@ -9,6 +9,7 @@ const GITHUB_ACCOUNT_KEY = "swarlipi.github.account.v1";
 const GITHUB_BACKUP_PATH = "latest.swarlipi.enc";
 const DEFAULT_GITHUB_APP_CLIENT_ID = "Iv23li7xRW1HbwedSG4u";
 const DEFAULT_GITHUB_APP_SLUG = "swarlipi-secure-sync-edu6tron";
+const DEFAULT_GITHUB_RELAY_URL = "https://swarlipi-secure-sync.edutron78.workers.dev";
 
 export interface GitHubProfile { login: string; avatarUrl: string | null; }
 export interface GitHubSession {
@@ -28,7 +29,7 @@ type RelayConnection = { connected?: boolean; expiresAt?: string | null; reposit
 
 function getClientId() { return process.env.EXPO_PUBLIC_GITHUB_APP_CLIENT_ID?.trim() || DEFAULT_GITHUB_APP_CLIENT_ID; }
 function getAppSlug() { return process.env.EXPO_PUBLIC_GITHUB_APP_SLUG?.trim() || DEFAULT_GITHUB_APP_SLUG; }
-function getRelayServiceUrl() { return process.env.EXPO_PUBLIC_GITHUB_BACKUP_SERVICE_URL?.trim().replace(/\/+$/, "") ?? ""; }
+function getRelayServiceUrl() { return process.env.EXPO_PUBLIC_GITHUB_BACKUP_SERVICE_URL?.trim().replace(/\/+$/, "") || DEFAULT_GITHUB_RELAY_URL; }
 export function isGitHubRelayConfigured() { return Platform.OS === "web" && Boolean(getRelayServiceUrl()); }
 
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
