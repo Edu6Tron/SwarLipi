@@ -17,10 +17,13 @@ export interface EncryptedBackupEnvelope {
   ciphertext: string;
 }
 
-function ensureBrowserCrypto() {
-  if (!globalThis.crypto?.subtle) {
+function getBrowserCrypto() {
+  const browserCrypto = typeof window !== "undefined" ? window.crypto : undefined;
+  const cryptoApi = browserCrypto ?? globalThis.crypto;
+  if (!cryptoApi?.subtle) {
     throw new Error("Encrypted browser backups are available in a modern web browser.");
   }
+  return cryptoApi;
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -40,8 +43,9 @@ function base64ToBytes(value: string) {
 }
 
 async function deriveKey(passphrase: string, salt: Uint8Array) {
-  const source = await globalThis.crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
-  return globalThis.crypto.subtle.deriveKey(
+  const cryptoApi = getBrowserCrypto();
+  const source = await cryptoApi.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return cryptoApi.subtle.deriveKey(
     { name: "PBKDF2", hash: "SHA-256", salt: salt.buffer as ArrayBuffer, iterations: PBKDF2_ITERATIONS },
     source,
     { name: "AES-GCM", length: 256 },
@@ -51,14 +55,14 @@ async function deriveKey(passphrase: string, salt: Uint8Array) {
 }
 
 export async function createEncryptedLibraryBackup(library: LibraryState, passphrase: string): Promise<EncryptedBackupEnvelope> {
-  ensureBrowserCrypto();
+  const cryptoApi = getBrowserCrypto();
   if (passphrase.trim().length < 12) throw new Error("Use a passphrase with at least 12 characters.");
 
-  const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
-  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const salt = cryptoApi.getRandomValues(new Uint8Array(16));
+  const iv = cryptoApi.getRandomValues(new Uint8Array(12));
   const key = await deriveKey(passphrase, salt);
   const plaintext = new TextEncoder().encode(JSON.stringify(library));
-  const encrypted = await globalThis.crypto.subtle.encrypt({ name: "AES-GCM", iv: iv.buffer as ArrayBuffer }, key, plaintext.buffer as ArrayBuffer);
+  const encrypted = await cryptoApi.subtle.encrypt({ name: "AES-GCM", iv: iv.buffer as ArrayBuffer }, key, plaintext.buffer as ArrayBuffer);
 
   return {
     version: BACKUP_VERSION,
@@ -75,13 +79,13 @@ export async function createEncryptedLibraryBackup(library: LibraryState, passph
 }
 
 export async function decryptEncryptedLibraryBackup(envelope: EncryptedBackupEnvelope, passphrase: string): Promise<LibraryState> {
-  ensureBrowserCrypto();
+  const cryptoApi = getBrowserCrypto();
   if (envelope.version !== BACKUP_VERSION) throw new Error("This SwarLipi backup format is not supported.");
   const salt = base64ToBytes(envelope.encryption.salt);
   const iv = base64ToBytes(envelope.encryption.iv);
   const key = await deriveKey(passphrase, salt);
   try {
-    const plaintext = await globalThis.crypto.subtle.decrypt(
+    const plaintext = await cryptoApi.subtle.decrypt(
       { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
       key,
       base64ToBytes(envelope.ciphertext).buffer as ArrayBuffer,
@@ -99,7 +103,7 @@ export function encryptedBackupFileName(createdAt: string) {
 }
 
 export function downloadEncryptedBackup(envelope: EncryptedBackupEnvelope) {
-  ensureBrowserCrypto();
+  getBrowserCrypto();
   const blob = new Blob([JSON.stringify(envelope)], { type: "application/vnd.swarlipi.encrypted+json" });
   const url = globalThis.URL.createObjectURL(blob);
   const anchor = globalThis.document.createElement("a");
@@ -116,7 +120,7 @@ export function getGitHubBackupServiceUrl() {
 }
 
 export function beginGitHubBackupAuthorization() {
-  ensureBrowserCrypto();
+  getBrowserCrypto();
   const serviceUrl = getGitHubBackupServiceUrl();
   if (!serviceUrl) throw new Error("The optional private GitHub connection service has not been configured yet.");
   const returnTo = `${globalThis.location.origin}${globalThis.location.pathname}`;
