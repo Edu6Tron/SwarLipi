@@ -8,6 +8,10 @@ Live validation on 22 August 2026 confirmed that the published Pages control now
 
 Mobile browser validation then showed that the temporary cross-origin callback cookie was not returned consistently. The relay now uses a short-lived, HMAC-signed state parameter and its protected GitHub App client-secret exchange without relying on that cookie. The state still binds the approved return address and expires after ten minutes; the GitHub authorization code is single-use.
 
+The callback rejection was traced to the missing callback cookie rather than a failed GitHub account selection. The cookie-free relay version was deployed successfully on 22 August 2026 and awaits the final end-to-end authorization return test.
+
+The cookie-free callback completed GitHub approval but returned `403` during `GET /user`. GitHub documents that this response can reflect insufficient App permissions and provides the `X-Accepted-GitHub-Permissions` response header for determining the exact required permission. The relay now shows that non-secret header in its diagnostic before any permission expansion is proposed.
+
 ## References
 
 [1] [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)

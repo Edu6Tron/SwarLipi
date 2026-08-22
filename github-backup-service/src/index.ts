@@ -154,7 +154,9 @@ async function finishAuthorization(request: Request, url: URL, env: Env) {
     const user = await githubJson("https://api.github.com/user", token.access_token);
     if (!user.response.ok || typeof user.payload.login !== "string") {
       const detail = typeof user.payload?.message === "string" ? `: ${user.payload.message}` : "";
-      throw new Error(`GitHub profile lookup failed (${user.response.status})${detail}`);
+      const acceptedPermissions = user.response.headers.get("X-Accepted-GitHub-Permissions");
+      const required = acceptedPermissions ? `; required permission: ${acceptedPermissions}` : "";
+      throw new Error(`GitHub profile lookup failed (${user.response.status})${detail}${required}`);
     }
     const session = await encryptSession({ accessToken: token.access_token, expiresAt: token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null, repository: null, profile: { login: user.payload.login, avatarUrl: typeof user.payload.avatar_url === "string" ? user.payload.avatar_url : null } }, env);
     const callback = new URL(stateRecord.returnTo);
