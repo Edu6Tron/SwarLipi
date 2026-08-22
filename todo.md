@@ -42,3 +42,6 @@
 - [x] Add secure GitHub authorization-service scaffolding without exposing credentials
 - [x] Configure, validate, and publish the GitHub Pages web edition
 - [ ] Configure the optional GitHub App and Cloudflare Worker to activate direct private-repository uploads
+- [x] Fix the reader note interface overlapping the reading-progress and scrolling-speed controls on Android
+- [x] Reduce the oversized reader control tray while preserving smooth slider usability
+- [ ] Validate and publish the corrected Android reader layout
