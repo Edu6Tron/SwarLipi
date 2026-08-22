@@ -6,10 +6,9 @@ interface Env {
 
 type GitHubProfile = { login: string; avatarUrl: string | null };
 type RelaySession = { accessToken: string; expiresAt: string | null; repository: string | null; profile: GitHubProfile };
-type StateRecord = { issuedAt: number; returnTo: string; codeVerifier: string };
+type StateRecord = { issuedAt: number; returnTo: string };
 
 const SESSION_HEADER = "X-SwarLipi-Session";
-const OAUTH_STATE_COOKIE = "swarlipi_github_state";
 const MAX_ENCRYPTED_ENVELOPE_BYTES = 1_000_000;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -107,10 +106,6 @@ async function decryptSession(value: string, env: Env): Promise<RelaySession | n
   }
 }
 
-function parseCookies(request: Request) {
-  return Object.fromEntries((request.headers.get("Cookie") ?? "").split(";").map((part) => part.trim().split("=")).filter(([key]) => Boolean(key)).map(([key, ...value]) => [key, decodeURIComponent(value.join("="))]));
-}
-
 function validReturnUrl(value: string | null, allowedOrigin: string) {
   if (!value) return null;
   try {
@@ -127,8 +122,8 @@ async function githubJson(url: string, accessToken: string, init: RequestInit = 
   return { response, payload };
 }
 
-async function exchangeCode(code: string, callbackUrl: string, codeVerifier: string, env: Env) {
-  const response = await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: env.GITHUB_APP_CLIENT_ID, client_secret: env.GITHUB_APP_CLIENT_SECRET, code, redirect_uri: callbackUrl, code_verifier: codeVerifier }).toString() });
+async function exchangeCode(code: string, callbackUrl: string, env: Env) {
+  const response = await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: env.GITHUB_APP_CLIENT_ID, client_secret: env.GITHUB_APP_CLIENT_SECRET, code, redirect_uri: callbackUrl }).toString() });
   if (!response.ok) throw new Error("GitHub authorization could not be completed.");
   const payload = await response.json() as { access_token?: string; expires_in?: number };
   if (!payload.access_token) throw new Error("GitHub did not return an access token.");
@@ -138,28 +133,24 @@ async function exchangeCode(code: string, callbackUrl: string, codeVerifier: str
 async function startAuthorization(url: URL, env: Env) {
   const returnTo = validReturnUrl(url.searchParams.get("returnTo"), env.ALLOWED_ORIGIN);
   if (!returnTo) return json({ error: "A valid return address is required." }, env, 400);
-  const record: StateRecord = { issuedAt: Date.now(), returnTo, codeVerifier: randomToken() };
+  const record: StateRecord = { issuedAt: Date.now(), returnTo };
   const state = await signState(record, env);
   const authorize = new URL("https://github.com/login/oauth/authorize");
   authorize.searchParams.set("client_id", env.GITHUB_APP_CLIENT_ID);
   authorize.searchParams.set("redirect_uri", `${url.origin}/auth/github/callback`);
   authorize.searchParams.set("state", state);
-  authorize.searchParams.set("code_challenge", await crypto.subtle.digest("SHA-256", encoder.encode(record.codeVerifier)).then((digest) => base64Url(new Uint8Array(digest))));
-  authorize.searchParams.set("code_challenge_method", "S256");
   authorize.searchParams.set("prompt", "select_account");
-  return new Response(null, { status: 302, headers: { Location: authorize.toString(), "Cache-Control": "no-store", "Set-Cookie": `${OAUTH_STATE_COOKIE}=${encodeURIComponent(state)}; HttpOnly; Secure; SameSite=Lax; Path=/auth/github/callback; Max-Age=600` } });
+  return new Response(null, { status: 302, headers: { Location: authorize.toString(), "Cache-Control": "no-store" } });
 }
 
 async function finishAuthorization(request: Request, url: URL, env: Env) {
   const state = url.searchParams.get("state");
   const code = url.searchParams.get("code");
-  const cookieState = parseCookies(request)[OAUTH_STATE_COOKIE];
-  const clearedStateCookie = `${OAUTH_STATE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/auth/github/callback; Max-Age=0`;
-  if (!state || !code || !cookieState || state !== cookieState) return new Response("GitHub authorization could not be verified. Please return to SwarLipi and try again.", { status: 400, headers: { "Set-Cookie": clearedStateCookie } });
+  if (!state || !code) return new Response("GitHub authorization could not be verified. Please return to SwarLipi and try again.", { status: 400 });
   const stateRecord = await verifyState(state, env);
-  if (!stateRecord) return new Response("This GitHub connection request expired. Please return to SwarLipi and try again.", { status: 400, headers: { "Set-Cookie": clearedStateCookie } });
+  if (!stateRecord) return new Response("This GitHub connection request expired. Please return to SwarLipi and try again.", { status: 400 });
   try {
-    const token = await exchangeCode(code, `${url.origin}/auth/github/callback`, stateRecord.codeVerifier, env);
+    const token = await exchangeCode(code, `${url.origin}/auth/github/callback`, env);
     const user = await githubJson("https://api.github.com/user", token.access_token);
     if (!user.response.ok || typeof user.payload.login !== "string") {
       const detail = typeof user.payload?.message === "string" ? `: ${user.payload.message}` : "";
@@ -168,9 +159,9 @@ async function finishAuthorization(request: Request, url: URL, env: Env) {
     const session = await encryptSession({ accessToken: token.access_token, expiresAt: token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null, repository: null, profile: { login: user.payload.login, avatarUrl: typeof user.payload.avatar_url === "string" ? user.payload.avatar_url : null } }, env);
     const callback = new URL(stateRecord.returnTo);
     callback.hash = new URLSearchParams({ githubBackup: "connected", relaySession: session }).toString();
-    return new Response(null, { status: 302, headers: { Location: callback.toString(), "Cache-Control": "no-store", "Set-Cookie": clearedStateCookie } });
+    return new Response(null, { status: 302, headers: { Location: callback.toString(), "Cache-Control": "no-store" } });
   } catch (error) {
-    return new Response(error instanceof Error ? error.message : "GitHub authorization failed.", { status: 502, headers: { "Set-Cookie": clearedStateCookie } });
+    return new Response(error instanceof Error ? error.message : "GitHub authorization failed.", { status: 502 });
   }
 }
 
