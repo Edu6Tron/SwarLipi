@@ -39,6 +39,7 @@ jobs:
         env:
           EXPO_PUBLIC_GITHUB_APP_CLIENT_ID: ${{ vars.SWARLIPI_GITHUB_APP_CLIENT_ID }}
           EXPO_PUBLIC_GITHUB_APP_SLUG: ${{ vars.SWARLIPI_GITHUB_APP_SLUG }}
+          EXPO_PUBLIC_GITHUB_BACKUP_SERVICE_URL: ${{ vars.SWARLIPI_GITHUB_BACKUP_SERVICE_URL }}
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

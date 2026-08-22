@@ -1,6 +1,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import {
+  beginGitHubRelayLogin,
   beginGitHubDeviceLogin,
   finishGitHubDeviceLogin,
   forgetGitHubSession,
@@ -10,6 +11,7 @@ import {
   openGitHubDeviceLogin,
   selectPrivateGitHubRepository,
 } from "./github-account";
+import { Platform } from "react-native";
 
 interface GitHubAccountContextValue {
   accountHydrated: boolean;
@@ -42,6 +44,10 @@ export function GitHubAccountProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startSignIn = useCallback(async (staySignedIn: boolean) => {
+    if (Platform.OS === "web") {
+      await beginGitHubRelayLogin(staySignedIn);
+      return;
+    }
     const next = await beginGitHubDeviceLogin();
     setKeepSignedIn(staySignedIn);
     setDeviceCode(next);
@@ -69,11 +75,11 @@ export function GitHubAccountProvider({ children }: { children: ReactNode }) {
   }, [session]);
 
   const logout = useCallback(async () => {
-    await forgetGitHubSession();
+    await forgetGitHubSession(session);
     setSession(null);
     setDeviceCode(null);
     setKeepSignedIn(false);
-  }, []);
+  }, [session]);
 
   const value = useMemo<GitHubAccountContextValue>(() => ({ accountHydrated, deviceCode, session, startSignIn, openSignInPage, completeSignIn, chooseRepository, logout }), [accountHydrated, chooseRepository, completeSignIn, deviceCode, logout, openSignInPage, session, startSignIn]);
   return <GitHubAccountContext.Provider value={value}>{children}</GitHubAccountContext.Provider>;

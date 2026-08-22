@@ -1,7 +1,8 @@
-name = "swarlipi-private-backup"
+name = "swarlipi-secure-sync"
 main = "src/index.ts"
 compatibility_date = "2026-08-22"
+workers_dev = true
 
-[[kv_namespaces]]
-binding = "CONNECTIONS"
-id = "REPLACE_WITH_YOUR_CLOUDFLARE_KV_NAMESPACE_ID"
+[vars]
+ALLOWED_ORIGIN = "https://edu6tron.github.io"
+GITHUB_APP_CLIENT_ID = "Iv23li7xRW1HbwedSG4u"

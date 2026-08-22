@@ -1,0 +1,31 @@
+name: Deploy SwarLipi GitHub Relay
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "github-backup-service/**"
+      - ".github/workflows/deploy-github-relay.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy secure GitHub authorization relay
+    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' && secrets.SWARLIPI_GITHUB_APP_CLIENT_SECRET != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy relay and update protected Worker secret
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: github-backup-service
+          command: deploy
+          secrets: |
+            GITHUB_APP_CLIENT_SECRET
+        env:
+          GITHUB_APP_CLIENT_SECRET: ${{ secrets.SWARLIPI_GITHUB_APP_CLIENT_SECRET }}
