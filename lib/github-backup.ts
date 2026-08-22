@@ -1,8 +1,14 @@
+import * as ExpoCrypto from "expo-crypto";
+import { gcm } from "@noble/ciphers/aes.js";
+import { pbkdf2Async } from "@noble/hashes/pbkdf2.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+
 import { decodeLibrary } from "./swarlipi-storage";
 import type { LibraryState } from "./swarlipi-storage";
 
 const BACKUP_VERSION = 1;
 const PBKDF2_ITERATIONS = 310_000;
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 export interface EncryptedBackupEnvelope {
   version: number;
@@ -17,33 +23,75 @@ export interface EncryptedBackupEnvelope {
   ciphertext: string;
 }
 
-function getBrowserCrypto() {
+function getWebCrypto() {
   const browserCrypto = typeof window !== "undefined" ? window.crypto : undefined;
-  const cryptoApi = browserCrypto ?? globalThis.crypto;
-  if (!cryptoApi?.subtle) {
-    throw new Error("Encrypted browser backups are available in a modern web browser.");
-  }
-  return cryptoApi;
+  const runtimeCrypto = globalThis.crypto;
+  return [browserCrypto, runtimeCrypto].find((candidate) => candidate?.subtle) ?? null;
 }
 
 function bytesToBase64(bytes: Uint8Array) {
-  let binary = "";
-  const chunk = 8_192;
-  for (let index = 0; index < bytes.length; index += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(index, Math.min(index + chunk, bytes.length)));
+  if (typeof globalThis.btoa === "function") {
+    let binary = "";
+    const chunk = 8_192;
+    for (let index = 0; index < bytes.length; index += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(index, Math.min(index + chunk, bytes.length)));
+    }
+    return globalThis.btoa(binary);
   }
-  return globalThis.btoa(binary);
+
+  let result = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const first = bytes[index] ?? 0;
+    const second = bytes[index + 1] ?? 0;
+    const third = bytes[index + 2] ?? 0;
+    result += BASE64_ALPHABET[first >> 2];
+    result += BASE64_ALPHABET[((first & 0x03) << 4) | (second >> 4)];
+    result += index + 1 < bytes.length ? BASE64_ALPHABET[((second & 0x0f) << 2) | (third >> 6)] : "=";
+    result += index + 2 < bytes.length ? BASE64_ALPHABET[third & 0x3f] : "=";
+  }
+  return result;
 }
 
 function base64ToBytes(value: string) {
-  const binary = globalThis.atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  if (typeof globalThis.atob === "function") {
+    const binary = globalThis.atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  }
+
+  const compact = value.replace(/[^A-Za-z0-9+/]/g, "");
+  const bytes = new Uint8Array(Math.floor((compact.length * 6) / 8));
+  let buffer = 0;
+  let bitCount = 0;
+  let outputIndex = 0;
+  for (const character of compact) {
+    buffer = (buffer << 6) | BASE64_ALPHABET.indexOf(character);
+    bitCount += 6;
+    if (bitCount >= 8) {
+      bitCount -= 8;
+      bytes[outputIndex] = (buffer >> bitCount) & 0xff;
+      outputIndex += 1;
+    }
+  }
   return bytes;
 }
 
-async function deriveKey(passphrase: string, salt: Uint8Array) {
-  const cryptoApi = getBrowserCrypto();
+async function createRandomBytes(length: number) {
+  const cryptoApi = getWebCrypto();
+  if (cryptoApi) return cryptoApi.getRandomValues(new Uint8Array(length));
+  return ExpoCrypto.getRandomBytesAsync(length);
+}
+
+async function deriveNativeKey(passphrase: string, salt: Uint8Array) {
+  return pbkdf2Async(sha256, new TextEncoder().encode(passphrase), salt, {
+    c: PBKDF2_ITERATIONS,
+    dkLen: 32,
+    asyncTick: 16,
+  });
+}
+
+async function deriveWebKey(passphrase: string, salt: Uint8Array, cryptoApi: Crypto) {
   const source = await cryptoApi.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
   return cryptoApi.subtle.deriveKey(
     { name: "PBKDF2", hash: "SHA-256", salt: salt.buffer as ArrayBuffer, iterations: PBKDF2_ITERATIONS },
@@ -54,15 +102,35 @@ async function deriveKey(passphrase: string, salt: Uint8Array) {
   );
 }
 
+async function encrypt(plaintext: Uint8Array, passphrase: string, salt: Uint8Array, iv: Uint8Array) {
+  const cryptoApi = getWebCrypto();
+  if (cryptoApi) {
+    const key = await deriveWebKey(passphrase, salt, cryptoApi);
+    return new Uint8Array(await cryptoApi.subtle.encrypt({ name: "AES-GCM", iv: iv.buffer as ArrayBuffer }, key, plaintext.buffer as ArrayBuffer));
+  }
+  return gcm(await deriveNativeKey(passphrase, salt), iv).encrypt(plaintext);
+}
+
+async function decrypt(ciphertext: Uint8Array, passphrase: string, salt: Uint8Array, iv: Uint8Array) {
+  const cryptoApi = getWebCrypto();
+  if (cryptoApi) {
+    const key = await deriveWebKey(passphrase, salt, cryptoApi);
+    return new Uint8Array(await cryptoApi.subtle.decrypt(
+      { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
+      key,
+      ciphertext.buffer as ArrayBuffer,
+    ));
+  }
+  return gcm(await deriveNativeKey(passphrase, salt), iv).decrypt(ciphertext);
+}
+
 export async function createEncryptedLibraryBackup(library: LibraryState, passphrase: string): Promise<EncryptedBackupEnvelope> {
-  const cryptoApi = getBrowserCrypto();
   if (passphrase.trim().length < 12) throw new Error("Use a passphrase with at least 12 characters.");
 
-  const salt = cryptoApi.getRandomValues(new Uint8Array(16));
-  const iv = cryptoApi.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(passphrase, salt);
+  const salt = await createRandomBytes(16);
+  const iv = await createRandomBytes(12);
   const plaintext = new TextEncoder().encode(JSON.stringify(library));
-  const encrypted = await cryptoApi.subtle.encrypt({ name: "AES-GCM", iv: iv.buffer as ArrayBuffer }, key, plaintext.buffer as ArrayBuffer);
+  const ciphertext = await encrypt(plaintext, passphrase, salt, iv);
 
   return {
     version: BACKUP_VERSION,
@@ -74,22 +142,16 @@ export async function createEncryptedLibraryBackup(library: LibraryState, passph
       salt: bytesToBase64(salt),
       iv: bytesToBase64(iv),
     },
-    ciphertext: bytesToBase64(new Uint8Array(encrypted)),
+    ciphertext: bytesToBase64(ciphertext),
   };
 }
 
 export async function decryptEncryptedLibraryBackup(envelope: EncryptedBackupEnvelope, passphrase: string): Promise<LibraryState> {
-  const cryptoApi = getBrowserCrypto();
   if (envelope.version !== BACKUP_VERSION) throw new Error("This SwarLipi backup format is not supported.");
   const salt = base64ToBytes(envelope.encryption.salt);
   const iv = base64ToBytes(envelope.encryption.iv);
-  const key = await deriveKey(passphrase, salt);
   try {
-    const plaintext = await cryptoApi.subtle.decrypt(
-      { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
-      key,
-      base64ToBytes(envelope.ciphertext).buffer as ArrayBuffer,
-    );
+    const plaintext = await decrypt(base64ToBytes(envelope.ciphertext), passphrase, salt, iv);
     const decoded = decodeLibrary(new TextDecoder().decode(plaintext));
     if (!decoded) throw new Error("This backup does not contain a valid SwarLipi library.");
     return decoded;
@@ -103,7 +165,6 @@ export function encryptedBackupFileName(createdAt: string) {
 }
 
 export function downloadEncryptedBackup(envelope: EncryptedBackupEnvelope) {
-  getBrowserCrypto();
   const blob = new Blob([JSON.stringify(envelope)], { type: "application/vnd.swarlipi.encrypted+json" });
   const url = globalThis.URL.createObjectURL(blob);
   const anchor = globalThis.document.createElement("a");
@@ -120,7 +181,6 @@ export function getGitHubBackupServiceUrl() {
 }
 
 export function beginGitHubBackupAuthorization() {
-  getBrowserCrypto();
   const serviceUrl = getGitHubBackupServiceUrl();
   if (!serviceUrl) throw new Error("The optional private GitHub connection service has not been configured yet.");
   const returnTo = `${globalThis.location.origin}${globalThis.location.pathname}`;
