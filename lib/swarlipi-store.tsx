@@ -30,6 +30,7 @@ interface SwarLipiContextValue extends LibraryState {
   deleteText: (id: string) => void;
   addAnnotation: (textId: string, body: string, anchorOffset: number) => void;
   setPreferences: (changes: Partial<ReaderPreferences>) => void;
+  replaceLibrary: (next: LibraryState) => void;
 }
 
 const SwarLipiContext = createContext<SwarLipiContextValue | null>(null);
@@ -136,9 +137,14 @@ export function SwarLipiProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
+  const replaceLibrary = useCallback((next: LibraryState) => {
+    setLibrary(next);
+    void persist(next);
+  }, []);
+
   const value = useMemo<SwarLipiContextValue>(
-    () => ({ ...library, hydrated, createText, updateText, reorderTexts, deleteText, addAnnotation, setPreferences }),
-    [library, hydrated, createText, updateText, reorderTexts, deleteText, addAnnotation, setPreferences],
+    () => ({ ...library, hydrated, createText, updateText, reorderTexts, deleteText, addAnnotation, setPreferences, replaceLibrary }),
+    [library, hydrated, createText, updateText, reorderTexts, deleteText, addAnnotation, setPreferences, replaceLibrary],
   );
 
   return <SwarLipiContext.Provider value={value}>{children}</SwarLipiContext.Provider>;

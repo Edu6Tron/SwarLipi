@@ -46,4 +46,11 @@
 - [x] Reduce the oversized reader control tray while preserving smooth slider usability
 - [x] Validate and publish the corrected Android reader layout
 - [x] Generate concise version-specific GitHub Release notes from the changes in each Android build
-- [ ] Validate and publish the improved Android release-note workflow
+- [x] Validate and publish the improved Android release-note workflow
+- [x] Explain and preserve no-login device-local storage and Android automatic-backup behavior
+- [x] Add a real GitHub account sign-in section with persistent session, visible account status, and logout
+- [x] Connect encrypted Android and browser libraries through the same authorized private GitHub backup repository
+- [x] Add safe encrypted cloud restore and explicit conflict choices for cross-device libraries
+- [x] Redesign GitHub Pages layout for clean narrow-browser and desktop presentation
+- [ ] Validate and publish the authenticated cross-device backup experience
+- [x] Implement the approved private GitHub account encrypted-sync option across Android and browser

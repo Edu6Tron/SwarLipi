@@ -36,6 +36,9 @@ jobs:
         run: pnpm check && pnpm test
       - name: Export static website
         run: pnpm web:export
+        env:
+          EXPO_PUBLIC_GITHUB_APP_CLIENT_ID: ${{ vars.SWARLIPI_GITHUB_APP_CLIENT_ID }}
+          EXPO_PUBLIC_GITHUB_APP_SLUG: ${{ vars.SWARLIPI_GITHUB_APP_SLUG }}
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
