@@ -86,7 +86,7 @@ function consumeRelayCallback() {
   const values = new URLSearchParams(globalThis.location?.hash.replace(/^#/, "") ?? "");
   const relayToken = values.get("relaySession");
   if (!relayToken || values.get("githubBackup") !== "connected") return null;
-  const keepSignedIn = new URLSearchParams(globalThis.location?.search ?? "").get("githubRelayPersist") === "1";
+  const keepSignedIn = values.get("githubRelayPersist") === "1";
   globalThis.history?.replaceState({}, "", globalThis.location.pathname);
   return { relayToken, keepSignedIn };
 }
@@ -131,10 +131,10 @@ export async function beginGitHubRelayLogin(keepSignedIn: boolean) {
   if (Platform.OS !== "web") throw new Error("Secure GitHub web sign-in is not available on this device.");
   const relayUrl = getRelayServiceUrl();
   if (!relayUrl) throw new Error("GitHub web sync is being connected. Please try again after its secure relay is deployed.");
-  const returnTo = new URL(`${globalThis.location?.origin ?? "https://edu6tron.github.io"}${globalThis.location?.pathname ?? "/SwarLipi/"}`);
-  if (keepSignedIn) returnTo.searchParams.set("githubRelayPersist", "1");
+  const returnTo = `${globalThis.location?.origin ?? "https://edu6tron.github.io"}${globalThis.location?.pathname ?? "/SwarLipi/"}`;
   const start = new URL(`${relayUrl}/auth/github/start`);
-  start.searchParams.set("returnTo", returnTo.toString());
+  start.searchParams.set("returnTo", returnTo);
+  start.searchParams.set("keep", keepSignedIn ? "1" : "0");
   globalThis.location.assign(start.toString());
 }
 

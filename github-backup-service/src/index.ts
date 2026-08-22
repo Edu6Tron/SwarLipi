@@ -6,7 +6,7 @@ interface Env {
 
 type GitHubProfile = { login: string; avatarUrl: string | null };
 type RelaySession = { accessToken: string; expiresAt: string | null; repository: string | null; profile: GitHubProfile };
-type StateRecord = { issuedAt: number; returnTo: string };
+type StateRecord = { issuedAt: number; returnTo: string; keepSignedIn: boolean };
 
 const SESSION_HEADER = "X-SwarLipi-Session";
 const MAX_ENCRYPTED_ENVELOPE_BYTES = 1_000_000;
@@ -133,7 +133,7 @@ async function exchangeCode(code: string, callbackUrl: string, env: Env) {
 async function startAuthorization(url: URL, env: Env) {
   const returnTo = validReturnUrl(url.searchParams.get("returnTo"), env.ALLOWED_ORIGIN);
   if (!returnTo) return json({ error: "A valid return address is required." }, env, 400);
-  const record: StateRecord = { issuedAt: Date.now(), returnTo };
+  const record: StateRecord = { issuedAt: Date.now(), returnTo, keepSignedIn: url.searchParams.get("keep") === "1" };
   const state = await signState(record, env);
   const authorize = new URL("https://github.com/login/oauth/authorize");
   authorize.searchParams.set("client_id", env.GITHUB_APP_CLIENT_ID);
@@ -160,7 +160,7 @@ async function finishAuthorization(request: Request, url: URL, env: Env) {
     }
     const session = await encryptSession({ accessToken: token.access_token, expiresAt: token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null, repository: null, profile: { login: user.payload.login, avatarUrl: typeof user.payload.avatar_url === "string" ? user.payload.avatar_url : null } }, env);
     const callback = new URL(stateRecord.returnTo);
-    callback.hash = new URLSearchParams({ githubBackup: "connected", relaySession: session }).toString();
+    callback.hash = new URLSearchParams({ githubBackup: "connected", githubRelayPersist: stateRecord.keepSignedIn ? "1" : "0", relaySession: session }).toString();
     return new Response(null, { status: 302, headers: { Location: callback.toString(), "Cache-Control": "no-store" } });
   } catch (error) {
     return new Response(error instanceof Error ? error.message : "GitHub authorization failed.", { status: 502 });

@@ -14,6 +14,8 @@ The cookie-free callback completed GitHub approval but returned `403` during `GE
 
 The final diagnosis was non-permission related: the relay did not send a `User-Agent` header to GitHub’s REST API. GitHub requires a valid `User-Agent` on every REST request and rejects missing or invalid values with `403 Forbidden`. The relay now sends the descriptive `SwarLipi-Secure-Sync` value. The GitHub App’s permissions, repository scope, and disabled webhooks remain unchanged.
 
+After the profile lookup succeeded, the return fragment still required a client-side correction: the stay-signed-in choice is now carried inside the signed relay state and returned as its own fragment field rather than relying on a query marker that could be interpreted as part of the encrypted relay session.
+
 ## References
 
 [1] [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
