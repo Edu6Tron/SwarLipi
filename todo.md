@@ -25,4 +25,8 @@
 - [x] Validate the corrected ordering flow and publish a signed Android APK update
 - [x] Reassess and fix the repeated Android crash when opening any text for the first time
 - [x] Replace the fullscreen reader's native Modal launch with a stable in-app overlay path
-- [ ] Validate the reader launch redesign in a signed Android APK and retest it on the Realme device
+- [x] Validate the reader launch redesign in a signed Android APK and retest it on the Realme device
+- [x] Replace tap-only reader progress and scrolling-speed controls with smooth drag gestures
+- [x] Add gesture-safe tests for reader slider calculations and drag-state behavior
+- [x] Redesign the reader control tray with a translucent text-through treatment
+- [ ] Validate and publish the smooth-reader-control Android update

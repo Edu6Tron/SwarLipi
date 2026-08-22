@@ -1,13 +1,13 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
   FlatList,
   KeyboardAvoidingView,
-  LayoutChangeEvent,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -20,7 +20,7 @@ import Animated, { FadeIn, FadeInDown, FadeOut, SlideInDown, SlideOutDown } from
 
 import { ScreenContainer } from "@/components/screen-container";
 import { feedback } from "@/lib/haptics";
-import { getReaderMaxOffset, getReaderOffset, getReaderProgress } from "@/lib/reader-safety";
+import { getReaderMaxOffset, getReaderOffset, getReaderProgress, getReaderScrollRate, getReaderSliderRatio } from "@/lib/reader-safety";
 import { useSwarLipi } from "@/lib/swarlipi-store";
 import { Annotation, clamp, LANGUAGE_OPTIONS, SavedText, TextLanguage } from "@/lib/swarlipi-storage";
 
@@ -28,6 +28,71 @@ const { height: WINDOW_HEIGHT } = Dimensions.get("window");
 const ALL_FILTER = "All";
 const SPEED_MIN = 10;
 const SPEED_MAX = 72;
+
+interface ReaderSliderProps {
+  accessibilityLabel: string;
+  children: ReactNode;
+  onSlidingComplete?: (value: number) => void;
+  onSlidingStart?: () => void;
+  onValueChange: (value: number) => void;
+  value: number;
+}
+
+function ReaderSlider({ accessibilityLabel, children, onSlidingComplete, onSlidingStart, onValueChange, value }: ReaderSliderProps) {
+  const sliderRef = useRef<View>(null);
+  const boundsRef = useRef({ pageX: 0, width: 1 });
+  const lastValueRef = useRef(value);
+
+  useEffect(() => {
+    lastValueRef.current = value;
+  }, [value]);
+
+  const measureTrack = useCallback(() => {
+    requestAnimationFrame(() => {
+      sliderRef.current?.measure((_x, _y, width, _height, pageX) => {
+        boundsRef.current = { pageX, width: Math.max(width, 1) };
+      });
+    });
+  }, []);
+
+  const updateFromPageX = useCallback((pageX: number) => {
+    const next = getReaderSliderRatio(pageX, boundsRef.current.pageX, boundsRef.current.width);
+    lastValueRef.current = next;
+    onValueChange(next);
+  }, [onValueChange]);
+
+  const responder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (event) => {
+      onSlidingStart?.();
+      updateFromPageX(event.nativeEvent.pageX);
+    },
+    onPanResponderMove: (event) => updateFromPageX(event.nativeEvent.pageX),
+    onPanResponderRelease: (event) => {
+      const next = getReaderSliderRatio(event.nativeEvent.pageX, boundsRef.current.pageX, boundsRef.current.width);
+      lastValueRef.current = next;
+      onValueChange(next);
+      onSlidingComplete?.(next);
+    },
+    onPanResponderTerminate: () => onSlidingComplete?.(lastValueRef.current),
+    onStartShouldSetPanResponder: () => true,
+  }), [onSlidingComplete, onSlidingStart, onValueChange, updateFromPageX]);
+
+  return (
+    <View
+      ref={sliderRef}
+      accessible
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="adjustable"
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(clamp(value, 0, 1) * 100) }}
+      onLayout={measureTrack}
+      style={styles.readerSliderTouch}
+      {...responder.panHandlers}
+    >
+      {children}
+    </View>
+  );
+}
 
 function formatPreview(body: string) {
   return body.replace(/\s+/g, " ").trim();
@@ -451,8 +516,6 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
   const [progress, setProgress] = useState(text.lastReadOffset);
   const [scrollRate, setScrollRate] = useState(preferences.scrollRate);
   const [metrics, setMetrics] = useState({ content: 1, viewport: 1 });
-  const [speedWidth, setSpeedWidth] = useState(1);
-  const [progressWidth, setProgressWidth] = useState(1);
   const [notesOpen, setNotesOpen] = useState(false);
   const [newNote, setNewNote] = useState("");
   const readerNotes = useMemo(() => annotations.filter((annotation) => annotation.textId === text.id), [annotations, text.id]);
@@ -507,11 +570,13 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
     scrollRef.current?.scrollTo({ y: nextOffset, animated: false });
   }, [maxOffset]);
 
-  function updateSpeed(value: number) {
-    const next = Math.round(clamp(value, SPEED_MIN, SPEED_MAX));
+  function updateSpeed(value: number, persist = false) {
+    const next = getReaderScrollRate(value, SPEED_MIN, SPEED_MAX);
     setScrollRate(next);
-    setPreferences({ scrollRate: next });
-    feedback.select();
+    if (persist) {
+      setPreferences({ scrollRate: next });
+      feedback.select();
+    }
   }
 
   function close() {
@@ -564,6 +629,7 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
 
       <ScrollView
         ref={scrollRef}
+        style={styles.readerScroll}
         contentContainerStyle={styles.readerScrollContent}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
@@ -595,6 +661,7 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
       </ScrollView>
 
       <View style={styles.readerControls}>
+        <LinearGradient pointerEvents="none" colors={["rgba(18,9,14,0)", "rgba(20,9,14,0.30)", "rgba(15,7,11,0.66)"]} locations={[0, 0.24, 1]} style={StyleSheet.absoluteFill} />
         <View style={styles.readerControlTopline}>
           <Pressable
             onPress={() => {
@@ -608,19 +675,12 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
           </Pressable>
           <Text style={styles.readerPercent}>{Math.round(progress * 100)}% read</Text>
         </View>
-        <Pressable
-          accessibilityRole="adjustable"
-          accessibilityLabel="Reading progress"
-          onLayout={(event: LayoutChangeEvent) => setProgressWidth(event.nativeEvent.layout.width)}
-          onPress={(event) => {
-            feedback.select();
-            seek(event.nativeEvent.locationX / progressWidth);
-          }}
-          style={styles.progressTrack}
-        >
-          <View style={[styles.progressFill, { width: `${Math.max(progress * 100, 1.5)}%` }]} />
-          <View style={[styles.progressThumb, { left: `${Math.max(progress * 100, 1.5)}%` }]} />
-        </Pressable>
+        <ReaderSlider accessibilityLabel="Reading progress" value={progress} onSlidingStart={() => setPlaying(false)} onValueChange={seek}>
+          <View pointerEvents="none" style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${Math.max(progress * 100, 1.5)}%` }]} />
+            <View style={[styles.progressThumb, { left: `${Math.max(progress * 100, 1.5)}%` }]} />
+          </View>
+        </ReaderSlider>
         <View style={styles.speedRow}>
           <View style={styles.speedLabelWrap}>
             <MaterialIcons name="speed" size={19} color="#F5C27D" />
@@ -628,16 +688,12 @@ function ReaderOverlay({ text, onClose }: ReaderOverlayProps) {
           </View>
           <Text style={styles.speedValue}>{scrollRate} px/s</Text>
         </View>
-        <Pressable
-          accessibilityRole="adjustable"
-          accessibilityLabel="Scrolling speed"
-          onLayout={(event: LayoutChangeEvent) => setSpeedWidth(event.nativeEvent.layout.width)}
-          onPress={(event) => updateSpeed(SPEED_MIN + (event.nativeEvent.locationX / speedWidth) * (SPEED_MAX - SPEED_MIN))}
-          style={styles.speedTrack}
-        >
-          <LinearGradient colors={accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.speedFill, { width: `${Math.max(speedProgress * 100, 4)}%` }]} />
-          <View style={[styles.speedThumb, { left: `${Math.max(speedProgress * 100, 4)}%` }]} />
-        </Pressable>
+        <ReaderSlider accessibilityLabel="Scrolling speed" value={speedProgress} onValueChange={(value) => updateSpeed(value)} onSlidingComplete={(value) => updateSpeed(value, true)}>
+          <View pointerEvents="none" style={styles.speedTrack}>
+            <LinearGradient colors={accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.speedFill, { width: `${Math.max(speedProgress * 100, 4)}%` }]} />
+            <View style={[styles.speedThumb, { left: `${Math.max(speedProgress * 100, 4)}%` }]} />
+          </View>
+        </ReaderSlider>
         <View style={styles.speedEnds}><Text style={styles.speedEndText}>SLOW</Text><Text style={styles.speedEndText}>FAST</Text></View>
         <Pressable
           accessibilityRole="button"
@@ -903,7 +959,8 @@ const styles = StyleSheet.create({
   readerNotesButton: { width: 43, height: 43, alignItems: "center", justifyContent: "center", position: "relative" },
   readerNoteBadge: { position: "absolute", top: 3, right: 2, width: 16, height: 16, borderRadius: 8, backgroundColor: "#FFBE69", justifyContent: "center", alignItems: "center" },
   readerNoteBadgeText: { color: "#38131B", fontSize: 9, fontWeight: "900" },
-  readerScrollContent: { paddingHorizontal: 30, paddingTop: 31, paddingBottom: 42 },
+  readerScroll: { flex: 1 },
+  readerScrollContent: { paddingHorizontal: 30, paddingTop: 31, paddingBottom: 304 },
   readerTextBlock: { paddingBottom: 38 },
   readerLanguageTag: { alignSelf: "flex-start", paddingVertical: 7, paddingHorizontal: 10, borderRadius: 12, backgroundColor: "rgba(255,237,219,0.11)", marginBottom: 21 },
   readerLanguageTagText: { color: "#FFD2AD", fontSize: 10, fontWeight: "800", letterSpacing: 0.9 },
@@ -911,19 +968,20 @@ const styles = StyleSheet.create({
   readerEndMark: { marginTop: 38, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
   readerEndLine: { height: 1, width: 32, backgroundColor: "rgba(255,229,206,0.35)" },
   readerEndText: { color: "#E8C7B6", fontSize: 11, textAlign: "center", marginTop: 10, fontWeight: "700" },
-  readerControls: { paddingHorizontal: 25, paddingTop: 15, paddingBottom: Platform.OS === "android" ? 24 : 16, backgroundColor: "rgba(17,10,13,0.75)", borderTopWidth: 1, borderTopColor: "rgba(255,217,190,0.15)" },
+  readerControls: { position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 5, overflow: "hidden", paddingHorizontal: 25, paddingTop: 34, paddingBottom: Platform.OS === "android" ? 24 : 16, borderTopWidth: 1, borderTopColor: "rgba(255,217,190,0.10)" },
   readerControlTopline: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   readerAuxButton: { flexDirection: "row", alignItems: "center", gap: 6 },
   readerAuxText: { color: "#FFF1E8", fontSize: 12, fontWeight: "700" },
   readerPercent: { color: "#D6B7AA", fontSize: 11, fontWeight: "700" },
-  progressTrack: { height: 5, borderRadius: 6, backgroundColor: "rgba(255,231,214,0.27)", justifyContent: "center" },
+  readerSliderTouch: { height: 36, justifyContent: "center" },
+  progressTrack: { height: 5, borderRadius: 6, backgroundColor: "rgba(255,231,214,0.31)", justifyContent: "center" },
   progressFill: { height: 5, borderRadius: 6, backgroundColor: "#FFF3E9" },
   progressThumb: { position: "absolute", width: 13, height: 13, borderRadius: 7, backgroundColor: "#FFF9F3", marginLeft: -6.5, shadowColor: "#000", shadowOpacity: 0.32, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
   speedRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 17, marginBottom: 9 },
   speedLabelWrap: { flexDirection: "row", alignItems: "center", gap: 6 },
   speedLabel: { color: "#EACFC0", fontSize: 10, fontWeight: "800", letterSpacing: 0.9 },
   speedValue: { color: "#FFC676", fontSize: 11, fontWeight: "800" },
-  speedTrack: { height: 7, borderRadius: 7, backgroundColor: "rgba(255,233,215,0.22)", justifyContent: "center" },
+  speedTrack: { height: 7, borderRadius: 7, backgroundColor: "rgba(255,233,215,0.27)", justifyContent: "center" },
   speedFill: { height: 7, borderRadius: 7 },
   speedThumb: { position: "absolute", width: 15, height: 15, borderRadius: 8, backgroundColor: "#FFF8F2", marginLeft: -7.5, borderWidth: 2, borderColor: "#52232A" },
   speedEnds: { flexDirection: "row", justifyContent: "space-between", marginTop: 6 },

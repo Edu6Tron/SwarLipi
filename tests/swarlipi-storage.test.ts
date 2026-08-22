@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getReaderMaxOffset, getReaderOffset, getReaderProgress } from "../lib/reader-safety";
+import { getReaderMaxOffset, getReaderOffset, getReaderProgress, getReaderScrollRate, getReaderSliderRatio } from "../lib/reader-safety";
 import { clamp, createInitialLibrary, decodeLibrary, encodeLibrary, reorderSavedTexts } from "../lib/swarlipi-storage";
 
 describe("SwarLipi local library format", () => {
@@ -44,5 +44,15 @@ describe("SwarLipi reader controls", () => {
     expect(getReaderProgress(80, 0)).toBe(0);
     expect(getReaderOffset(0.4, 500)).toBe(200);
     expect(getReaderProgress(220, 500)).toBe(0.44);
+  });
+
+  it("maps a finger position to a bounded slider value and persists only valid speed values", () => {
+    expect(getReaderSliderRatio(80, 100, 240)).toBe(0);
+    expect(getReaderSliderRatio(220, 100, 240)).toBeCloseTo(0.5);
+    expect(getReaderSliderRatio(390, 100, 240)).toBe(1);
+    expect(getReaderSliderRatio(220, 100, 0)).toBe(0);
+    expect(getReaderScrollRate(0, 10, 72)).toBe(10);
+    expect(getReaderScrollRate(0.5, 10, 72)).toBe(41);
+    expect(getReaderScrollRate(4, 10, 72)).toBe(72);
   });
 });
